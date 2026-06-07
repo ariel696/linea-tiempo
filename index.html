@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Línea de Tiempo</title>
+  <link rel="stylesheet" href="style.css"/>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+</head>
+<body>
+
+  <!-- ====== PANTALLA INICIO ====== -->
+  <div id="screen-home" class="screen active">
+    <header class="home-header">
+      <div class="logo">⟡ Líneas de Tiempo</div>
+      <div class="header-right">
+        <div id="user-area" class="user-area hidden">
+          <img id="user-avatar" class="user-avatar" src="" alt=""/>
+          <span id="user-name" class="user-name"></span>
+          <button class="btn-ghost" id="btn-logout">Salir</button>
+        </div>
+        <button class="btn-cta" id="btn-acceder">Crear mi propia línea de tiempo</button>
+      </div>
+    </header>
+    <main class="home-main">
+      <div class="home-hero">
+        <h1>Tus historias,<br/><em>en orden.</em></h1>
+        <p class="hero-sub">Crea líneas de tiempo visuales para organizar eventos, proyectos o recuerdos.</p>
+        <button class="btn-primary" id="btn-nueva">
+          <span class="btn-icon">+</span> Nueva línea de tiempo
+        </button>
+      </div>
+
+      <!-- ====== LÍNEA DE TIEMPO PRINCIPAL EMBEBIDA ====== -->
+      <section class="home-timeline-section">
+        <div class="home-timeline-header">
+          <h2 class="home-timeline-title" id="home-tl-title">Principal</h2>
+          <span class="home-timeline-desc" id="home-tl-desc"></span>
+        </div>
+        <div class="home-zoom-controls">
+          <button class="zoom-btn" id="home-btn-zoom-out" title="Alejar">−</button>
+          <span class="zoom-label" id="home-zoom-label">100%</span>
+          <button class="zoom-btn" id="home-btn-zoom-in" title="Acercar">+</button>
+          <button class="zoom-reset" id="home-btn-zoom-reset">Reset</button>
+          <span class="zoom-hint">Ctrl + scroll para zoom · Arrastra para mover</span>
+        </div>
+        <div class="timeline-scroll-wrapper home-tl-wrapper" id="home-timeline-scroll-wrapper">
+          <div class="timeline-canvas" id="home-timeline-canvas">
+            <div class="timeline-container" id="home-timeline-container">
+              <div class="timeline-line" id="home-timeline-line"></div>
+              <div class="timeline-events" id="home-timeline-events"></div>
+              <div class="timeline-empty" id="home-timeline-empty" style="display:none">
+                <p>No hay eventos aún.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <!-- ====================================================== -->
+
+      <section class="timelines-section">
+        <h2 class="section-title">Líneas de tiempo</h2>
+        <div id="timelines-grid" class="timelines-grid">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-icon">◎</div>
+            <p>Aún no hay líneas de tiempo.<br/>¡Sé el primero en crear una!</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ====== PANTALLA AUTH ====== -->
+  <div id="screen-auth" class="screen hidden">
+    <div class="auth-layout">
+
+      <!-- Lado izquierdo: branding -->
+      <div class="auth-brand">
+        <div class="auth-logo">⟡</div>
+        <h2>Líneas de Tiempo</h2>
+        <p>Organiza tu historia,<br/><em>un evento a la vez.</em></p>
+        <!-- Decoración mini línea de tiempo -->
+        <div class="auth-brand-deco">
+          <div class="auth-brand-deco-dot"></div>
+          <div class="auth-brand-deco-line"></div>
+          <div class="auth-brand-deco-dot" style="margin-right:0; margin-left:10px;"></div>
+        </div>
+      </div>
+
+      <!-- Lado derecho: formulario -->
+      <div class="auth-box">
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login">Iniciar sesión</button>
+          <button class="auth-tab" data-tab="register">Registrarse</button>
+        </div>
+
+        <!-- LOGIN -->
+        <div id="tab-login" class="auth-panel active">
+          <button class="btn-google" id="btn-google-login">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+            Continuar con Google
+          </button>
+          <div class="auth-divider"><span>o con email</span></div>
+          <div class="form-group">
+            <label>Correo electrónico</label>
+            <input type="email" id="login-email" placeholder="tu@correo.com"/>
+          </div>
+          <div class="form-group">
+            <label>Contraseña</label>
+            <input type="password" id="login-password" placeholder="••••••••"/>
+          </div>
+          <button class="btn-primary full" id="btn-login-email">Iniciar sesión</button>
+          <div class="auth-divider"><span>o por teléfono</span></div>
+          <div class="form-group">
+            <label>Número de teléfono</label>
+            <input type="tel" id="login-phone" placeholder="+56 9 1234 5678"/>
+          </div>
+          <div id="phone-code-wrap" class="form-group hidden">
+            <label>Código de verificación</label>
+            <input type="text" id="login-phone-code" placeholder="123456" maxlength="6"/>
+          </div>
+          <div id="recaptcha-container"></div>
+          <button class="btn-secondary full" id="btn-login-phone">Enviar código SMS</button>
+          <button class="btn-primary full hidden" id="btn-verify-phone">Verificar código</button>
+        </div>
+
+        <!-- REGISTER -->
+        <div id="tab-register" class="auth-panel hidden">
+          <button class="btn-google" id="btn-google-register">
+            <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+            Registrarse con Google
+          </button>
+          <div class="auth-divider"><span>o con email</span></div>
+          <div class="form-group">
+            <label>Nombre</label>
+            <input type="text" id="reg-nombre" placeholder="Tu nombre"/>
+          </div>
+          <div class="form-group">
+            <label>Correo electrónico</label>
+            <input type="email" id="reg-email" placeholder="tu@correo.com"/>
+          </div>
+          <div class="form-group">
+            <label>Contraseña</label>
+            <input type="password" id="reg-password" placeholder="Mínimo 6 caracteres"/>
+          </div>
+          <button class="btn-primary full" id="btn-register-email">Crear cuenta</button>
+        </div>
+
+        <p class="auth-error hidden" id="auth-error"></p>
+        <button class="btn-ghost auth-back" id="btn-auth-back">← Volver al inicio</button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ====== MODAL: NUEVA LÍNEA DE TIEMPO ====== -->
+  <div id="modal-nueva" class="modal-overlay hidden">
+    <div class="modal">
+      <button class="modal-close" id="modal-close-nueva">✕</button>
+      <h2>Nueva línea de tiempo</h2>
+      <div class="form-group">
+        <label>Nombre</label>
+        <input type="text" id="input-nombre" placeholder="Ej: Mi carrera profesional"/>
+      </div>
+      <div class="form-group">
+        <label>Descripción <span class="opcional">(opcional)</span></label>
+        <input type="text" id="input-desc" placeholder="Ej: Eventos importantes de mi vida laboral"/>
+      </div>
+      <div class="form-group">
+        <label>Color de acento</label>
+        <div class="color-picker">
+          <button class="color-dot" data-color="#E8845A" style="background:#E8845A"></button>
+          <button class="color-dot" data-color="#5A8EE8" style="background:#5A8EE8"></button>
+          <button class="color-dot" data-color="#5AE8A0" style="background:#5AE8A0"></button>
+          <button class="color-dot" data-color="#E85AB0" style="background:#E85AB0"></button>
+          <button class="color-dot" data-color="#E8D45A" style="background:#E8D45A"></button>
+          <button class="color-dot" data-color="#AE5AE8" style="background:#AE5AE8"></button>
+        </div>
+      </div>
+      <button class="btn-primary full" id="btn-crear-confirmar">Crear</button>
+    </div>
+  </div>
+
+  <!-- ====== MODAL: EDITAR LÍNEA DE TIEMPO ====== -->
+  <div id="modal-editar-tl" class="modal-overlay hidden">
+    <div class="modal">
+      <button class="modal-close" id="modal-close-editar-tl">✕</button>
+      <h2>Editar línea de tiempo</h2>
+      <div class="form-group">
+        <label>Nombre</label>
+        <input type="text" id="edit-tl-nombre" placeholder="Ej: Mi carrera profesional"/>
+      </div>
+      <div class="form-group">
+        <label>Descripción <span class="opcional">(opcional)</span></label>
+        <input type="text" id="edit-tl-desc" placeholder="Ej: Eventos importantes de mi vida laboral"/>
+      </div>
+      <div class="form-group">
+        <label>Color de acento</label>
+        <div class="color-picker" id="edit-tl-color-picker">
+          <button class="color-dot edit-tl-color" data-color="#E8845A" style="background:#E8845A"></button>
+          <button class="color-dot edit-tl-color" data-color="#5A8EE8" style="background:#5A8EE8"></button>
+          <button class="color-dot edit-tl-color" data-color="#5AE8A0" style="background:#5AE8A0"></button>
+          <button class="color-dot edit-tl-color" data-color="#E85AB0" style="background:#E85AB0"></button>
+          <button class="color-dot edit-tl-color" data-color="#E8D45A" style="background:#E8D45A"></button>
+          <button class="color-dot edit-tl-color" data-color="#AE5AE8" style="background:#AE5AE8"></button>
+        </div>
+      </div>
+      <button class="btn-primary full" id="btn-editar-tl-confirmar">Guardar cambios</button>
+    </div>
+  </div>
+
+  <!-- ====== PANTALLA EDITOR ====== -->
+  <div id="screen-editor" class="screen hidden">
+    <header class="editor-header">
+      <button class="btn-back" id="btn-back">← Inicio</button>
+      <div class="editor-title-wrap">
+        <h1 class="editor-title" id="editor-title">Mi línea de tiempo</h1>
+        <span class="editor-desc" id="editor-desc"></span>
+      </div>
+      <div class="editor-header-actions">
+        <button class="btn-edit-tl hidden" id="btn-edit-tl" title="Editar línea de tiempo">✏ Editar</button>
+        <button class="btn-primary sm" id="btn-add-event">+ Evento</button>
+      </div>
+    </header>
+
+    <div class="editor-body">
+      <!-- Controles de zoom -->
+      <div class="zoom-controls">
+        <button class="zoom-btn" id="btn-zoom-out" title="Alejar">−</button>
+        <span class="zoom-label" id="zoom-label">100%</span>
+        <button class="zoom-btn" id="btn-zoom-in" title="Acercar">+</button>
+        <button class="zoom-reset" id="btn-zoom-reset">Reset</button>
+        <span class="zoom-hint">Ctrl + scroll para zoom · Arrastra para mover</span>
+      </div>
+
+      <!-- Área scrolleable -->
+      <div class="timeline-scroll-wrapper" id="timeline-scroll-wrapper">
+        <div class="timeline-canvas" id="timeline-canvas">
+          <div class="timeline-container" id="timeline-container">
+            <div class="timeline-line" id="timeline-line"></div>
+            <div class="timeline-events" id="timeline-events"></div>
+            <div class="timeline-empty" id="timeline-empty">
+              <p>Agrega tu primer evento con el botón <strong>"+ Evento"</strong></p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== MODAL: NUEVO / EDITAR EVENTO ====== -->
+  <div id="modal-evento" class="modal-overlay hidden">
+    <div class="modal modal-evento">
+      <button class="modal-close" id="modal-close-evento">✕</button>
+      <h2 id="modal-evento-titulo">Nuevo evento</h2>
+      <div class="form-group">
+        <label>Título del evento *</label>
+        <input type="text" id="ev-titulo" placeholder="Ej: Primer trabajo"/>
+      </div>
+      <div class="form-group">
+        <label>Fecha</label>
+        <input type="text" id="ev-fecha" placeholder="Ej: Enero 2020 o 15/03/2021"/>
+      </div>
+      <div class="form-group">
+        <label>Descripción</label>
+        <textarea id="ev-descripcion" placeholder="Cuenta qué pasó en este momento..." rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Imagen <span class="opcional">(opcional)</span></label>
+        <div class="img-upload-area" id="img-upload-area">
+          <input type="file" id="ev-imagen" accept="image/*" hidden/>
+          <div class="img-placeholder" id="img-placeholder">
+            <span class="img-icon">🖼</span>
+            <span>Haz clic para subir imagen</span>
+          </div>
+          <img id="img-preview" class="img-preview hidden" src="" alt="preview"/>
+          <button class="img-remove hidden" id="img-remove">✕ Quitar imagen</button>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-danger hidden" id="btn-eliminar-evento">Eliminar</button>
+        <button class="btn-primary" id="btn-guardar-evento">Guardar evento</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== MODAL: VER EVENTO ====== -->
+  <div id="modal-ver" class="modal-overlay hidden">
+    <div class="modal modal-ver">
+      <button class="modal-close" id="modal-close-ver">✕</button>
+      <div class="ver-fecha" id="ver-fecha"></div>
+      <h2 id="ver-titulo"></h2>
+      <img id="ver-imagen" class="ver-imagen hidden" src="" alt=""/>
+      <p id="ver-descripcion" class="ver-desc"></p>
+      <button class="btn-secondary" id="btn-editar-desde-ver">✏ Editar evento</button>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast hidden"></div>
+
+  <script type="module" src="script.js"></script>
+</body>
+</html>
