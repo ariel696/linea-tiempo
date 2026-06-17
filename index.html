@@ -26,7 +26,7 @@
       <div class="home-hero">
         <h1>Tus historias,<br/><em>en orden.</em></h1>
         <p class="hero-sub">Crea líneas de tiempo visuales para organizar eventos, proyectos o recuerdos.</p>
-        <button class="btn-primary" id="btn-nueva">
+        <button class="btn-primary hidden" id="btn-nueva">
           <span class="btn-icon">+</span> Nueva línea de tiempo
         </button>
       </div>
@@ -36,6 +36,7 @@
         <div class="home-timeline-header">
           <h2 class="home-timeline-title" id="home-tl-title">Principal</h2>
           <span class="home-timeline-desc" id="home-tl-desc"></span>
+          <button class="btn-mini hidden" id="btn-edit-home-principal">Editar principal</button>
         </div>
         <div class="home-zoom-controls">
           <button class="zoom-btn" id="home-btn-zoom-out" title="Alejar">−</button>
@@ -56,7 +57,6 @@
           </div>
         </div>
       </section>
-      <!-- ====================================================== -->
 
       <section class="timelines-section">
         <h2 class="section-title">Líneas de tiempo</h2>
@@ -73,13 +73,10 @@
   <!-- ====== PANTALLA AUTH ====== -->
   <div id="screen-auth" class="screen hidden">
     <div class="auth-layout">
-
-      <!-- Lado izquierdo: branding -->
       <div class="auth-brand">
         <div class="auth-logo">⟡</div>
         <h2>Líneas de Tiempo</h2>
         <p>Organiza tu historia,<br/><em>un evento a la vez.</em></p>
-        <!-- Decoración mini línea de tiempo -->
         <div class="auth-brand-deco">
           <div class="auth-brand-deco-dot"></div>
           <div class="auth-brand-deco-line"></div>
@@ -87,7 +84,6 @@
         </div>
       </div>
 
-      <!-- Lado derecho: formulario -->
       <div class="auth-box">
         <div class="auth-tabs">
           <button class="auth-tab active" data-tab="login">Iniciar sesión</button>
@@ -149,7 +145,6 @@
         <p class="auth-error hidden" id="auth-error"></p>
         <button class="btn-ghost auth-back" id="btn-auth-back">← Volver al inicio</button>
       </div>
-
     </div>
   </div>
 
@@ -216,15 +211,17 @@
       <div class="editor-title-wrap">
         <h1 class="editor-title" id="editor-title">Mi línea de tiempo</h1>
         <span class="editor-desc" id="editor-desc"></span>
+        <!-- Muestra el nombre del dueño si no es el usuario actual -->
+        <span class="editor-owner hidden" id="editor-owner"></span>
       </div>
       <div class="editor-header-actions">
+        <button class="btn-danger-sm hidden" id="btn-delete-tl" title="Eliminar línea de tiempo">🗑 Eliminar</button>
         <button class="btn-edit-tl hidden" id="btn-edit-tl" title="Editar línea de tiempo">✏ Editar</button>
-        <button class="btn-primary sm" id="btn-add-event">+ Evento</button>
+        <button class="btn-primary sm hidden" id="btn-add-event">+ Evento</button>
       </div>
     </header>
 
     <div class="editor-body">
-      <!-- Controles de zoom -->
       <div class="zoom-controls">
         <button class="zoom-btn" id="btn-zoom-out" title="Alejar">−</button>
         <span class="zoom-label" id="zoom-label">100%</span>
@@ -233,7 +230,6 @@
         <span class="zoom-hint">Ctrl + scroll para zoom · Arrastra para mover</span>
       </div>
 
-      <!-- Área scrolleable -->
       <div class="timeline-scroll-wrapper" id="timeline-scroll-wrapper">
         <div class="timeline-canvas" id="timeline-canvas">
           <div class="timeline-container" id="timeline-container">
@@ -277,6 +273,13 @@
           <button class="img-remove hidden" id="img-remove">✕ Quitar imagen</button>
         </div>
       </div>
+      <div class="form-group">
+        <div class="subtimeline-edit-header">
+          <label>Sub línea de tiempo <span class="opcional">(opcional)</span></label>
+          <button type="button" class="btn-mini" id="btn-add-sub-event">+ Hito</button>
+        </div>
+        <div class="subtimeline-editor" id="subtimeline-editor"></div>
+      </div>
       <div class="modal-actions">
         <button class="btn-danger hidden" id="btn-eliminar-evento">Eliminar</button>
         <button class="btn-primary" id="btn-guardar-evento">Guardar evento</button>
@@ -292,6 +295,7 @@
       <h2 id="ver-titulo"></h2>
       <img id="ver-imagen" class="ver-imagen hidden" src="" alt=""/>
       <p id="ver-descripcion" class="ver-desc"></p>
+      <div id="ver-subtimeline" class="ver-subtimeline hidden"></div>
       <button class="btn-secondary" id="btn-editar-desde-ver">✏ Editar evento</button>
     </div>
   </div>

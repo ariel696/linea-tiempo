@@ -1,6 +1,5 @@
 // ============================================================
 //  LÍNEA DE TIEMPO — script.js
-//  Firebase Auth + Firestore + Storage (base64 en Firestore)
 // ============================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -32,12 +31,12 @@ import {
 
 // ─── CONFIGURACIÓN FIREBASE ───────────────────────────────
 const firebaseConfig = {
-  apiKey: "AIzaSyAwThVn7mBns-rEtwHDZZBGc_BvpnapHe8",
-  authDomain: "linea-tiempo-e06e7.firebaseapp.com",
-  projectId: "linea-tiempo-e06e7",
-  storageBucket: "linea-tiempo-e06e7.firebasestorage.app",
-  messagingSenderId: "700427072241",
-  appId: "1:700427072241:web:148b5f6778be30aa502f50"
+  apiKey: "AIzaSyAbMpE02ZcU3OSmr0VZOAnkO_bJFNttU3Q",
+  authDomain: "linea-tiempo-d4a50.firebaseapp.com",
+  projectId: "linea-tiempo-d4a50",
+  storageBucket: "linea-tiempo-d4a50.firebasestorage.app",
+  messagingSenderId: "475632320193",
+  appId: "1:475632320193:web:21c0f5a55fa97a0f9cde40"
 };
 
 const ROOT_EMAIL = "arielriquelme08@gmail.com";
@@ -55,11 +54,9 @@ let selectedColor      = "#E8845A";
 let selectedEditColor  = "#E8845A";
 let pendingImageData   = null;
 let confirmationResult = null;
+let isSavingEvent      = false;
+let isCreatingTimeline = false;
 
-// ─── BANDERA ANTI-DUPLICADO ───────────────────────────────
-let isSavingEvent = false;
-
-// ─── CACHÉ LOCAL ─────────────────────────────────────────
 let _timelinesCache = null;
 let _timelineCache  = {};
 
@@ -68,17 +65,14 @@ function invalidateCache(id){
   if(id) delete _timelineCache[id];
 }
 
-// ─── ZOOM STATE ───────────────────────────────────────────
-let zoomLevel = 1.0;
-const ZOOM_MIN  = 0.4;
-const ZOOM_MAX  = 2.0;
-const ZOOM_STEP = 0.15;
-
-// ─── HOME TIMELINE ZOOM STATE ─────────────────────────────
+let zoomLevel     = 1.0;
 let homeZoomLevel = 1.0;
+const ZOOM_MIN    = 0.4;
+const ZOOM_MAX    = 2.0;
+const ZOOM_STEP   = 0.15;
 
 // ─── UTILIDADES ───────────────────────────────────────────
-function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function hexToAlpha(hex,a){ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; }
 
@@ -116,70 +110,24 @@ function setAuthError(msg){
   else { el.classList.add('hidden'); }
 }
 
-// ─── ZOOM ─────────────────────────────────────────────────
-function applyZoom(newZoom){
-  zoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
-  const canvas = document.getElementById('timeline-canvas');
-  if(canvas){
-    canvas.style.transform = `scale(${zoomLevel})`;
-    canvas.style.transformOrigin = 'top left';
-  }
-  const label = document.getElementById('zoom-label');
-  if(label) label.textContent = Math.round(zoomLevel * 100) + '%';
+function friendlyFirestoreError(e){
+  const code = e && e.code ? e.code : '';
+  const map = {
+    'permission-denied':'Firebase no permitió guardar. Revisa y despliega las reglas de Firestore.',
+    'unauthenticated':'Debes iniciar sesión para guardar.',
+    'unavailable':'Firebase no está disponible ahora. Intenta de nuevo.',
+    'not-found':'No se encontró la base de datos o el documento.',
+    'failed-precondition':'Falta crear un índice o activar Firestore en el proyecto.'
+  };
+  return map[code] || 'Error al crear. Intenta de nuevo.';
 }
 
-function setupZoomControls(){
-  const btnIn    = document.getElementById('btn-zoom-in');
-  const btnOut   = document.getElementById('btn-zoom-out');
-  const btnReset = document.getElementById('btn-zoom-reset');
-
-  if(btnIn)    btnIn.onclick    = ()=> applyZoom(zoomLevel + ZOOM_STEP);
-  if(btnOut)   btnOut.onclick   = ()=> applyZoom(zoomLevel - ZOOM_STEP);
-  if(btnReset) btnReset.onclick = ()=> applyZoom(1.0);
-
-  const wrapper = document.getElementById('timeline-scroll-wrapper');
-  if(wrapper){
-    wrapper.addEventListener('wheel', e => {
-      if(e.ctrlKey || e.metaKey){
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        applyZoom(zoomLevel + delta);
-      }
-    }, { passive: false });
-  }
-}
-
-// ─── DRAG TO SCROLL ───────────────────────────────────────
-function setupDragScroll(){
-  const wrapper = document.getElementById('timeline-scroll-wrapper');
-  if(!wrapper) return;
-
-  let isDragging = false;
-  let startX, startY, scrollLeft, scrollTop;
-
-  wrapper.addEventListener('mousedown', e => {
-    if(e.target.closest('.event-card') || e.target.closest('.zoom-controls')) return;
-    isDragging = true;
-    startX     = e.pageX - wrapper.offsetLeft;
-    startY     = e.pageY - wrapper.offsetTop;
-    scrollLeft = wrapper.scrollLeft;
-    scrollTop  = wrapper.scrollTop;
-    wrapper.style.cursor = 'grabbing';
-  });
-
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-    if(wrapper) wrapper.style.cursor = 'grab';
-  });
-
-  wrapper.addEventListener('mousemove', e => {
-    if(!isDragging) return;
-    e.preventDefault();
-    const x = e.pageX - wrapper.offsetLeft;
-    const y = e.pageY - wrapper.offsetTop;
-    wrapper.scrollLeft = scrollLeft - (x - startX);
-    wrapper.scrollTop  = scrollTop  - (y - startY);
-  });
+// ─── PERMISOS ─────────────────────────────────────────────
+function canEdit(tl){
+  if(!currentUser) return false;
+  if(isRoot) return true;
+  if(tl.ownerId && tl.ownerId === currentUser.uid) return true;
+  return false;
 }
 
 // ─── HEADER ───────────────────────────────────────────────
@@ -191,12 +139,11 @@ function updateHeader(user){
   if(user){
     userArea.classList.remove('hidden');
     btnAcceder.classList.add('hidden');
+    btnNueva.classList.remove('hidden');
     document.getElementById('user-name').textContent = user.displayName || user.email || 'Usuario';
     const avatar = document.getElementById('user-avatar');
     if(user.photoURL){ avatar.src=user.photoURL; avatar.style.display='block'; }
     else { avatar.style.display='none'; }
-    if(isRoot) btnNueva.classList.remove('hidden');
-    else btnNueva.classList.add('hidden');
   } else {
     userArea.classList.add('hidden');
     btnAcceder.classList.remove('hidden');
@@ -204,27 +151,114 @@ function updateHeader(user){
   }
 }
 
-// ─── FIRESTORE + CACHÉ ────────────────────────────────────
+// ─── ZOOM ─────────────────────────────────────────────────
+function applyZoom(newZoom){
+  zoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
+  const canvas = document.getElementById('timeline-canvas');
+  if(canvas){ canvas.style.transform=`scale(${zoomLevel})`; canvas.style.transformOrigin='top left'; }
+  const label = document.getElementById('zoom-label');
+  if(label) label.textContent = Math.round(zoomLevel*100)+'%';
+}
+
+function setupZoomControls(){
+  const btnIn=document.getElementById('btn-zoom-in');
+  const btnOut=document.getElementById('btn-zoom-out');
+  const btnReset=document.getElementById('btn-zoom-reset');
+  if(btnIn)    btnIn.onclick    = ()=>applyZoom(zoomLevel+ZOOM_STEP);
+  if(btnOut)   btnOut.onclick   = ()=>applyZoom(zoomLevel-ZOOM_STEP);
+  if(btnReset) btnReset.onclick = ()=>applyZoom(1.0);
+  const wrapper=document.getElementById('timeline-scroll-wrapper');
+  if(wrapper){
+    wrapper.addEventListener('wheel',e=>{
+      if(e.ctrlKey||e.metaKey){ e.preventDefault(); applyZoom(zoomLevel+(e.deltaY>0?-ZOOM_STEP:ZOOM_STEP)); }
+    },{passive:false});
+  }
+}
+
+function setupDragScroll(){
+  const wrapper=document.getElementById('timeline-scroll-wrapper');
+  if(!wrapper) return;
+  let isDragging=false,startX,startY,scrollLeft,scrollTop;
+  wrapper.addEventListener('mousedown',e=>{
+    if(e.target.closest('.event-card')||e.target.closest('.zoom-controls')) return;
+    isDragging=true; startX=e.pageX-wrapper.offsetLeft; startY=e.pageY-wrapper.offsetTop;
+    scrollLeft=wrapper.scrollLeft; scrollTop=wrapper.scrollTop; wrapper.style.cursor='grabbing';
+  });
+  document.addEventListener('mouseup',()=>{ isDragging=false; if(wrapper) wrapper.style.cursor='grab'; });
+  wrapper.addEventListener('mousemove',e=>{
+    if(!isDragging) return; e.preventDefault();
+    wrapper.scrollLeft=scrollLeft-(e.pageX-wrapper.offsetLeft-startX);
+    wrapper.scrollTop=scrollTop-(e.pageY-wrapper.offsetTop-startY);
+  });
+}
+
+function applyHomeZoom(newZoom){
+  homeZoomLevel=Math.min(ZOOM_MAX,Math.max(ZOOM_MIN,newZoom));
+  const canvas=document.getElementById('home-timeline-canvas');
+  if(canvas){ canvas.style.transform=`scale(${homeZoomLevel})`; canvas.style.transformOrigin='top left'; }
+  const label=document.getElementById('home-zoom-label');
+  if(label) label.textContent=Math.round(homeZoomLevel*100)+'%';
+}
+
+function setupHomeZoomControls(){
+  const btnIn=document.getElementById('home-btn-zoom-in');
+  const btnOut=document.getElementById('home-btn-zoom-out');
+  const btnReset=document.getElementById('home-btn-zoom-reset');
+  if(btnIn)    btnIn.onclick    = ()=>applyHomeZoom(homeZoomLevel+ZOOM_STEP);
+  if(btnOut)   btnOut.onclick   = ()=>applyHomeZoom(homeZoomLevel-ZOOM_STEP);
+  if(btnReset) btnReset.onclick = ()=>applyHomeZoom(1.0);
+  const wrapper=document.getElementById('home-timeline-scroll-wrapper');
+  if(wrapper){
+    wrapper.addEventListener('wheel',e=>{
+      if(e.ctrlKey||e.metaKey){ e.preventDefault(); applyHomeZoom(homeZoomLevel+(e.deltaY>0?-ZOOM_STEP:ZOOM_STEP)); }
+    },{passive:false});
+  }
+}
+
+function setupHomeDragScroll(){
+  const wrapper=document.getElementById('home-timeline-scroll-wrapper');
+  if(!wrapper) return;
+  let isDragging=false,startX,startY,scrollLeft,scrollTop;
+  wrapper.addEventListener('mousedown',e=>{
+    if(e.target.closest('.event-card')) return;
+    isDragging=true; startX=e.pageX-wrapper.offsetLeft; startY=e.pageY-wrapper.offsetTop;
+    scrollLeft=wrapper.scrollLeft; scrollTop=wrapper.scrollTop; wrapper.style.cursor='grabbing';
+  });
+  document.addEventListener('mouseup',()=>{ isDragging=false; if(wrapper) wrapper.style.cursor='grab'; });
+  wrapper.addEventListener('mousemove',e=>{
+    if(!isDragging) return; e.preventDefault();
+    wrapper.scrollLeft=scrollLeft-(e.pageX-wrapper.offsetLeft-startX);
+    wrapper.scrollTop=scrollTop-(e.pageY-wrapper.offsetTop-startY);
+  });
+}
+
+// ─── FIRESTORE ────────────────────────────────────────────
 async function fetchTimelines(){
   if(_timelinesCache) return _timelinesCache;
-  const q = query(collection(db,'timelines'), orderBy('creadoEn','desc'));
-  const snap = await getDocs(q);
-  _timelinesCache = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+  const q=query(collection(db,'timelines'),orderBy('creadoEn','desc'));
+  const snap=await getDocs(q);
+  _timelinesCache=snap.docs.map(d=>({id:d.id,...d.data()}));
   return _timelinesCache;
 }
 
 async function createTimeline(data){
-  const ref = await addDoc(collection(db,'timelines'),{ ...data, eventos:[], creadoEn:serverTimestamp() });
+  const ref=await addDoc(collection(db,'timelines'),{
+    ...data,
+    eventos:[],
+    creadoEn:serverTimestamp(),
+    ownerId:currentUser.uid,
+    ownerName:currentUser.displayName||currentUser.email||'Usuario'
+  });
   invalidateCache();
   return ref;
 }
 
-async function updateTimeline(id, data){
-  await updateDoc(doc(db,'timelines',id), data);
-  if(_timelineCache[id]) _timelineCache[id] = { ..._timelineCache[id], ...data };
+async function updateTimeline(id,data){
+  await updateDoc(doc(db,'timelines',id),data);
+  if(_timelineCache[id]) _timelineCache[id]={..._timelineCache[id],...data};
   if(_timelinesCache){
-    const idx = _timelinesCache.findIndex(t=>t.id===id);
-    if(idx>-1) _timelinesCache[idx] = { ..._timelinesCache[idx], ...data };
+    const idx=_timelinesCache.findIndex(t=>t.id===id);
+    if(idx>-1) _timelinesCache[idx]={..._timelinesCache[idx],...data};
   }
 }
 
@@ -235,73 +269,145 @@ async function deleteTimeline(id){
 
 async function getTimeline(id){
   if(_timelineCache[id]) return _timelineCache[id];
-  const snap = await getDoc(doc(db,'timelines',id));
+  const snap=await getDoc(doc(db,'timelines',id));
   if(!snap.exists()) return null;
-  const data = { id:snap.id, ...snap.data() };
-  _timelineCache[id] = data;
+  const data={id:snap.id,...snap.data()};
+  _timelineCache[id]=data;
   return data;
 }
 
-// ─── ORDENAR EVENTOS POR AÑO ──────────────────────────────
 function extraerAnio(fecha){
   if(!fecha) return Infinity;
-  const match = fecha.match(/\d{4}/);
-  return match ? parseInt(match[0]) : Infinity;
+  const match=fecha.match(/\d{4}/);
+  return match?parseInt(match[0]):Infinity;
 }
 
 function ordenarEventos(eventos){
-  return [...eventos].sort((a, b) => extraerAnio(a.fecha) - extraerAnio(b.fecha));
+  return [...eventos].sort((a,b)=>extraerAnio(a.fecha)-extraerAnio(b.fecha));
 }
 
-// ─── LÍNEA PRINCIPAL EN HOME ──────────────────────────────
-const PRINCIPAL_NOMBRE = 'Principal';
+function ordenarSubEventos(items){
+  return [...(items||[])].sort((a,b)=>extraerAnio(a.fecha)-extraerAnio(b.fecha));
+}
+
+function getSubtimelineFromEditor(){
+  return [...document.querySelectorAll('.subtimeline-row')].map(row=>({
+    fecha: row.querySelector('.sub-fecha').value.trim(),
+    titulo: row.querySelector('.sub-titulo').value.trim(),
+    descripcion: row.querySelector('.sub-desc').value.trim()
+  })).filter(item=>item.fecha||item.titulo||item.descripcion);
+}
+
+function addSubtimelineRow(item={}){
+  const editor=document.getElementById('subtimeline-editor');
+  const row=document.createElement('div');
+  row.className='subtimeline-row';
+  row.innerHTML=`
+    <input class="sub-fecha" type="text" placeholder="Fecha" value="${escHtml(item.fecha||'')}"/>
+    <input class="sub-titulo" type="text" placeholder="Título del hito" value="${escHtml(item.titulo||'')}"/>
+    <textarea class="sub-desc" rows="2" placeholder="Detalle breve">${escHtml(item.descripcion||'')}</textarea>
+    <button type="button" class="sub-remove" title="Quitar hito">×</button>`;
+  row.querySelector('.sub-remove').addEventListener('click',()=>row.remove());
+  editor.appendChild(row);
+}
+
+function resetSubtimelineEditor(items=[]){
+  const editor=document.getElementById('subtimeline-editor');
+  editor.innerHTML='';
+  ordenarSubEventos(items).forEach(addSubtimelineRow);
+}
+
+function renderSubtimelineView(items){
+  const wrap=document.getElementById('ver-subtimeline');
+  const subEventos=ordenarSubEventos(items);
+  if(subEventos.length===0){
+    wrap.classList.add('hidden');
+    wrap.innerHTML='';
+    return;
+  }
+  wrap.classList.remove('hidden');
+  wrap.innerHTML=`
+    <div class="ver-subtimeline-title">Referencias relacionadas</div>
+    <div class="mini-timeline">
+      ${subEventos.map(item=>`
+        <div class="mini-timeline-item">
+          <div class="mini-dot"></div>
+          <div class="mini-date">${escHtml(item.fecha||'')}</div>
+          <div class="mini-title">${escHtml(item.titulo||'Sin título')}</div>
+          ${item.descripcion?`<div class="mini-desc">${escHtml(item.descripcion)}</div>`:''}
+        </div>
+      `).join('')}
+    </div>`;
+}
+
+// ─── HOME ─────────────────────────────────────────────────
+const PRINCIPAL_NOMBRES=['Principal-Inicio','Principal'];
+
+function esTimelinePrincipal(tl){
+  const nombre=(tl.nombre||'').trim().toLowerCase();
+  return PRINCIPAL_NOMBRES.some(item=>item.toLowerCase()===nombre);
+}
+
+function getHomePrincipalTimeline(timelines){
+  return PRINCIPAL_NOMBRES.map(nombre=>timelines.find(tl=>(tl.nombre||'').trim().toLowerCase()===nombre.toLowerCase())).find(Boolean);
+}
 
 async function renderHomePrincipalTimeline(timelines){
   try {
-    if(!timelines) timelines = await fetchTimelines();
-    const principal = timelines.find(tl =>
-      tl.nombre && tl.nombre.trim().toLowerCase() === PRINCIPAL_NOMBRE.toLowerCase()
-    );
-    if(!principal) return;
+    if(!timelines) timelines=await fetchTimelines();
+    const principal=getHomePrincipalTimeline(timelines);
 
-    const titleEl = document.getElementById('home-tl-title');
-    const descEl  = document.getElementById('home-tl-desc');
-    if(titleEl) titleEl.textContent = principal.nombre;
-    if(descEl)  descEl.textContent  = principal.desc || '';
-
-    // Aplicar color de acento de esa línea
-    const color = principal.color || '#E8845A';
-    const section = document.querySelector('.home-timeline-section');
-    if(section) section.style.setProperty('--home-accent', color);
-
-    const container = document.getElementById('home-timeline-events');
-    const emptyEl   = document.getElementById('home-timeline-empty');
-    const lineEl    = document.getElementById('home-timeline-line');
+    const titleEl=document.getElementById('home-tl-title');
+    const descEl=document.getElementById('home-tl-desc');
+    const editBtn=document.getElementById('btn-edit-home-principal');
+    const container=document.getElementById('home-timeline-events');
+    const emptyEl=document.getElementById('home-timeline-empty');
+    const lineEl=document.getElementById('home-timeline-line');
     if(!container) return;
-    container.innerHTML = '';
+    container.innerHTML='';
 
-    const eventos = ordenarEventos(principal.eventos || []);
-
-    if(eventos.length === 0){
-      if(emptyEl) emptyEl.style.display = 'flex';
-      if(lineEl)  lineEl.style.display  = 'none';
+    if(!principal){
+      if(titleEl) titleEl.textContent='Principal-Inicio';
+      if(descEl) descEl.textContent='Crea una línea llamada Principal-Inicio para destacarla aquí.';
+      if(emptyEl) emptyEl.style.display='flex';
+      if(lineEl)  lineEl.style.display='none';
+      if(editBtn) editBtn.classList.add('hidden');
+      if(emptyEl) emptyEl.onclick=null;
       return;
     }
 
-    if(emptyEl) emptyEl.style.display = 'none';
-    if(lineEl)  lineEl.style.display  = 'block';
+    if(titleEl) titleEl.textContent=principal.nombre;
+    if(descEl)  descEl.textContent=principal.desc||'';
+    if(editBtn){
+      editBtn.classList.toggle('hidden',!isRoot);
+      editBtn.onclick=()=>openTimeline(principal.id);
+    }
 
-    eventos.forEach((ev, i) => {
-      const item = document.createElement('div');
-      item.className = 'event-item';
-      item.style.animationDelay = (i * 0.06) + 's';
-      item.style.setProperty('--accent', color);
-      item.style.setProperty('--accent-glow', hexToAlpha(color, 0.18));
+    const color=principal.color||'#E8845A';
+    const section=document.querySelector('.home-timeline-section');
+    if(section) section.style.setProperty('--home-accent',color);
 
-      const imgHtml  = ev.imagen      ? `<img class="event-thumbnail" src="${ev.imagen}" alt=""/>` : '';
-      const descHtml = ev.descripcion ? `<div class="event-descripcion">${escHtml(ev.descripcion)}</div>` : '';
+    const eventos=ordenarEventos(principal.eventos||[]);
 
-      item.innerHTML = `
+    if(eventos.length===0){
+      if(emptyEl) emptyEl.style.display='flex';
+      if(lineEl)  lineEl.style.display='none';
+      if(emptyEl) emptyEl.onclick=()=>openTimeline(principal.id);
+      return;
+    }
+
+    if(emptyEl) emptyEl.style.display='none';
+    if(lineEl)  lineEl.style.display='block';
+
+    eventos.forEach((ev,i)=>{
+      const item=document.createElement('div');
+      item.className='event-item';
+      item.style.animationDelay=(i*0.06)+'s';
+      item.style.setProperty('--accent',color);
+      item.style.setProperty('--accent-glow',hexToAlpha(color,0.18));
+      const imgHtml=ev.imagen?`<img class="event-thumbnail" src="${ev.imagen}" alt=""/>`:'';
+      const descHtml=ev.descripcion?`<div class="event-descripcion">${escHtml(ev.descripcion)}</div>`:'';
+      item.innerHTML=`
         <div class="event-spacer"></div>
         <div class="event-card">
           ${imgHtml}
@@ -312,120 +418,51 @@ async function renderHomePrincipalTimeline(timelines){
         <div class="event-connector"></div>
         <div class="event-dot"></div>
         <div class="event-connector"></div>
-        <div class="event-spacer"></div>
-      `;
-
-      // Al hacer clic abre la línea de tiempo completa
-      item.querySelector('.event-card').addEventListener('click', () => openTimeline(principal.id));
+        <div class="event-spacer"></div>`;
+      item.querySelector('.event-card').addEventListener('click',()=>openTimeline(principal.id));
       container.appendChild(item);
     });
 
     setupHomeZoomControls();
     setupHomeDragScroll();
     applyHomeZoom(1.0);
-  } catch(e){ console.error('Error cargando línea Principal:', e); }
+  } catch(e){ console.error('Error cargando línea principal del inicio:',e); }
 }
 
-function applyHomeZoom(newZoom){
-  homeZoomLevel = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, newZoom));
-  const canvas = document.getElementById('home-timeline-canvas');
-  if(canvas){
-    canvas.style.transform = `scale(${homeZoomLevel})`;
-    canvas.style.transformOrigin = 'top left';
-  }
-  const label = document.getElementById('home-zoom-label');
-  if(label) label.textContent = Math.round(homeZoomLevel * 100) + '%';
-}
-
-function setupHomeZoomControls(){
-  const btnIn    = document.getElementById('home-btn-zoom-in');
-  const btnOut   = document.getElementById('home-btn-zoom-out');
-  const btnReset = document.getElementById('home-btn-zoom-reset');
-
-  if(btnIn)    btnIn.onclick    = ()=> applyHomeZoom(homeZoomLevel + ZOOM_STEP);
-  if(btnOut)   btnOut.onclick   = ()=> applyHomeZoom(homeZoomLevel - ZOOM_STEP);
-  if(btnReset) btnReset.onclick = ()=> applyHomeZoom(1.0);
-
-  const wrapper = document.getElementById('home-timeline-scroll-wrapper');
-  if(wrapper){
-    wrapper.addEventListener('wheel', e => {
-      if(e.ctrlKey || e.metaKey){
-        e.preventDefault();
-        const delta = e.deltaY > 0 ? -ZOOM_STEP : ZOOM_STEP;
-        applyHomeZoom(homeZoomLevel + delta);
-      }
-    }, { passive: false });
-  }
-}
-
-function setupHomeDragScroll(){
-  const wrapper = document.getElementById('home-timeline-scroll-wrapper');
-  if(!wrapper) return;
-
-  let isDragging = false;
-  let startX, startY, scrollLeft, scrollTop;
-
-  wrapper.addEventListener('mousedown', e => {
-    if(e.target.closest('.event-card')) return;
-    isDragging = true;
-    startX     = e.pageX - wrapper.offsetLeft;
-    startY     = e.pageY - wrapper.offsetTop;
-    scrollLeft = wrapper.scrollLeft;
-    scrollTop  = wrapper.scrollTop;
-    wrapper.style.cursor = 'grabbing';
-  });
-
-  document.addEventListener('mouseup', () => {
-    isDragging = false;
-    if(wrapper) wrapper.style.cursor = 'grab';
-  });
-
-  wrapper.addEventListener('mousemove', e => {
-    if(!isDragging) return;
-    e.preventDefault();
-    const x = e.pageX - wrapper.offsetLeft;
-    const y = e.pageY - wrapper.offsetTop;
-    wrapper.scrollLeft = scrollLeft - (x - startX);
-    wrapper.scrollTop  = scrollTop  - (y - startY);
-  });
-}
-
-// ─── HOME ─────────────────────────────────────────────────
 async function renderHome(){
   showScreen('home');
   updateHeader(currentUser);
-  const grid  = document.getElementById('timelines-grid');
-  const empty = document.getElementById('empty-state');
+  const grid=document.getElementById('timelines-grid');
+  const empty=document.getElementById('empty-state');
   grid.querySelectorAll('.timeline-card').forEach(c=>c.remove());
-  let timelines = [];
-  try { timelines = await fetchTimelines(); } catch(e){ console.error(e); }
 
-  // Renderizar línea Principal embebida — pasamos datos ya cargados
+  let timelines=[];
+  try { timelines=await fetchTimelines(); } catch(e){ console.error(e); }
+
   renderHomePrincipalTimeline(timelines);
 
-  // Filtrar "Principal" de la grilla de cards
-  const otrasTimelines = timelines.filter(tl =>
-    !tl.nombre || tl.nombre.trim().toLowerCase() !== PRINCIPAL_NOMBRE.toLowerCase()
-  );
+  const principalHome=getHomePrincipalTimeline(timelines);
+  const otras=timelines.filter(tl=>!principalHome||tl.id!==principalHome.id);
 
-  if(otrasTimelines.length===0){
+  if(otras.length===0){
     empty.style.display='block';
   } else {
     empty.style.display='none';
-    otrasTimelines.forEach((tl,i)=>{
-      const card = document.createElement('div');
+    otras.forEach((tl,i)=>{
+      const card=document.createElement('div');
       card.className='timeline-card';
-      card.style.setProperty('--card-accent', tl.color||'#E8845A');
+      card.style.setProperty('--card-accent',tl.color||'#E8845A');
       card.style.animationDelay=(i*0.07)+'s';
-      const count = (tl.eventos||[]).length;
+      const count=(tl.eventos||[]).length;
+      const esPropia=currentUser&&tl.ownerId===currentUser.uid;
+      const ownerLabel=tl.ownerName?`<span class="card-owner">por ${escHtml(tl.ownerName)}</span>`:'';
+      const propiaLabel=esPropia?`<span class="card-owner card-owner--propia">✎ Tuya</span>`:ownerLabel;
       card.innerHTML=`
         <span class="card-icon">◉</span>
         <div class="card-name">${escHtml(tl.nombre)}</div>
         <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
-        <div class="card-meta">
-          <span class="dot"></span>
-          ${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}
-        </div>`;
+        <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>
+        ${propiaLabel}`;
       card.addEventListener('click',()=>openTimeline(tl.id));
       grid.appendChild(card);
     });
@@ -441,7 +478,7 @@ function setupAuthTabs(){
       document.querySelectorAll('.auth-tab').forEach(t=>t.classList.remove('active'));
       document.querySelectorAll('.auth-panel').forEach(p=>{ p.classList.remove('active'); p.classList.add('hidden'); });
       tab.classList.add('active');
-      const panel = document.getElementById('tab-'+tab.dataset.tab);
+      const panel=document.getElementById('tab-'+tab.dataset.tab);
       panel.classList.remove('hidden');
       panel.classList.add('active');
       setAuthError('');
@@ -450,38 +487,38 @@ function setupAuthTabs(){
 }
 
 async function loginWithGoogle(){
-  try { await signInWithPopup(auth, gProvider); }
+  try { await signInWithPopup(auth,gProvider); }
   catch(e){ setAuthError(friendlyError(e.code)); }
 }
 
 async function loginWithEmail(){
-  const email = document.getElementById('login-email').value.trim();
-  const pass  = document.getElementById('login-password').value;
+  const email=document.getElementById('login-email').value.trim();
+  const pass=document.getElementById('login-password').value;
   if(!email||!pass){ setAuthError('Completa email y contraseña.'); return; }
-  try { await signInWithEmailAndPassword(auth, email, pass); }
+  try { await signInWithEmailAndPassword(auth,email,pass); }
   catch(e){ setAuthError(friendlyError(e.code)); }
 }
 
 async function registerWithEmail(){
-  const nombre = document.getElementById('reg-nombre').value.trim();
-  const email  = document.getElementById('reg-email').value.trim();
-  const pass   = document.getElementById('reg-password').value;
+  const nombre=document.getElementById('reg-nombre').value.trim();
+  const email=document.getElementById('reg-email').value.trim();
+  const pass=document.getElementById('reg-password').value;
   if(!email||!pass){ setAuthError('Completa todos los campos.'); return; }
   if(pass.length<6){ setAuthError('La contraseña debe tener al menos 6 caracteres.'); return; }
   try {
-    const cred = await createUserWithEmailAndPassword(auth, email, pass);
-    if(nombre) await updateProfile(cred.user,{ displayName: nombre });
+    const cred=await createUserWithEmailAndPassword(auth,email,pass);
+    if(nombre) await updateProfile(cred.user,{displayName:nombre});
   } catch(e){ setAuthError(friendlyError(e.code)); }
 }
 
 async function sendPhoneSMS(){
-  const phone = document.getElementById('login-phone').value.trim();
-  if(!phone){ setAuthError('Ingresa tu número de teléfono con código de país (Ej: +56 9...)'); return; }
+  const phone=document.getElementById('login-phone').value.trim();
+  if(!phone){ setAuthError('Ingresa tu número con código de país (Ej: +56 9...)'); return; }
   try {
     if(!window.recaptchaVerifier){
-      window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container',{ size:'invisible' });
+      window.recaptchaVerifier=new RecaptchaVerifier(auth,'recaptcha-container',{size:'invisible'});
     }
-    confirmationResult = await signInWithPhoneNumber(auth, phone, window.recaptchaVerifier);
+    confirmationResult=await signInWithPhoneNumber(auth,phone,window.recaptchaVerifier);
     document.getElementById('phone-code-wrap').classList.remove('hidden');
     document.getElementById('btn-login-phone').classList.add('hidden');
     document.getElementById('btn-verify-phone').classList.remove('hidden');
@@ -494,50 +531,62 @@ async function sendPhoneSMS(){
 }
 
 async function verifyPhoneCode(){
-  const code = document.getElementById('login-phone-code').value.trim();
+  const code=document.getElementById('login-phone-code').value.trim();
   if(!code||code.length<6){ setAuthError('Ingresa el código de 6 dígitos.'); return; }
   try { await confirmationResult.confirm(code); }
   catch(e){ setAuthError('Código incorrecto. Intenta de nuevo.'); }
 }
 
 function friendlyError(code){
-  const map = {
-    'auth/user-not-found':           'No existe una cuenta con ese email.',
-    'auth/wrong-password':           'Contraseña incorrecta.',
-    'auth/email-already-in-use':     'Ese email ya está registrado.',
-    'auth/invalid-email':            'Email inválido.',
-    'auth/weak-password':            'Contraseña muy débil (mínimo 6 caracteres).',
-    'auth/too-many-requests':        'Demasiados intentos. Espera un momento.',
-    'auth/popup-closed-by-user':     'Cerraste la ventana de Google.',
-    'auth/invalid-phone-number':     'Número de teléfono inválido. Usa formato +56...',
+  const map={
+    'auth/user-not-found':'No existe una cuenta con ese email.',
+    'auth/wrong-password':'Contraseña incorrecta.',
+    'auth/email-already-in-use':'Ese email ya está registrado.',
+    'auth/invalid-email':'Email inválido.',
+    'auth/weak-password':'Contraseña muy débil (mínimo 6 caracteres).',
+    'auth/too-many-requests':'Demasiados intentos. Espera un momento.',
+    'auth/popup-closed-by-user':'Cerraste la ventana de Google.',
+    'auth/invalid-phone-number':'Número inválido. Usa formato +56...',
     'auth/invalid-verification-code':'Código de verificación incorrecto.',
   };
-  return map[code] || 'Ocurrió un error. Intenta de nuevo.';
+  return map[code]||'Ocurrió un error. Intenta de nuevo.';
 }
 
 // ─── EDITOR ───────────────────────────────────────────────
 async function openTimeline(id){
-  activeTimelineId = id;
-  const tl = await getTimeline(id);
+  activeTimelineId=id;
+  const tl=await getTimeline(id);
   if(!tl) return;
 
-  document.documentElement.style.setProperty('--accent', tl.color||'#E8845A');
-  document.documentElement.style.setProperty('--accent-glow', hexToAlpha(tl.color||'#E8845A',0.18));
-  document.getElementById('editor-title').textContent = tl.nombre;
-  document.getElementById('editor-desc').textContent  = tl.desc||'';
+  const puedeEditar=canEdit(tl);
 
-  const btnAdd    = document.getElementById('btn-add-event');
-  const btnEditTl = document.getElementById('btn-edit-tl');
-  if(isRoot){
+  document.documentElement.style.setProperty('--accent',tl.color||'#E8845A');
+  document.documentElement.style.setProperty('--accent-glow',hexToAlpha(tl.color||'#E8845A',0.18));
+  document.getElementById('editor-title').textContent=tl.nombre;
+  document.getElementById('editor-desc').textContent=tl.desc||'';
+
+  const ownerEl=document.getElementById('editor-owner');
+  if(ownerEl){
+    if(!puedeEditar&&tl.ownerName){ ownerEl.textContent=`por ${tl.ownerName}`; ownerEl.classList.remove('hidden'); }
+    else { ownerEl.classList.add('hidden'); }
+  }
+
+  const btnAdd=document.getElementById('btn-add-event');
+  const btnEditTl=document.getElementById('btn-edit-tl');
+  const btnDelTl=document.getElementById('btn-delete-tl');
+
+  if(puedeEditar){
     btnAdd.classList.remove('hidden');
     btnEditTl.classList.remove('hidden');
+    if(btnDelTl) btnDelTl.classList.remove('hidden');
   } else {
     btnAdd.classList.add('hidden');
     btnEditTl.classList.add('hidden');
+    if(btnDelTl) btnDelTl.classList.add('hidden');
   }
 
   showScreen('editor');
-  zoomLevel = 1.0;
+  zoomLevel=1.0;
   renderTimelineFromCache(tl);
   setupZoomControls();
   setupDragScroll();
@@ -545,155 +594,135 @@ async function openTimeline(id){
 }
 
 function renderTimelineFromCache(tl){
-  const container = document.getElementById('timeline-events');
-  const empty     = document.getElementById('timeline-empty');
-  const line      = document.getElementById('timeline-line');
-  container.innerHTML = '';
+  const container=document.getElementById('timeline-events');
+  const empty=document.getElementById('timeline-empty');
+  const line=document.getElementById('timeline-line');
+  container.innerHTML='';
 
-  // Ordenar eventos por año antes de renderizar
-  const eventos = ordenarEventos(tl.eventos || []);
+  const eventos=ordenarEventos(tl.eventos||[]);
 
-  if(eventos.length === 0){
-    empty.style.display = 'flex';
-    line.style.display  = 'none';
+  if(eventos.length===0){
+    empty.style.display='flex';
+    line.style.display='none';
   } else {
-    empty.style.display = 'none';
-    line.style.display  = 'block';
-
-    eventos.forEach((ev, i) => {
-      const item = document.createElement('div');
-      item.className = 'event-item';
-      item.style.animationDelay = (i * 0.06) + 's';
-
-      const imgHtml  = ev.imagen      ? `<img class="event-thumbnail" src="${ev.imagen}" alt=""/>` : '';
-      const descHtml = ev.descripcion ? `<div class="event-descripcion">${escHtml(ev.descripcion)}</div>` : '';
-
-      item.innerHTML = `
+    empty.style.display='none';
+    line.style.display='block';
+    eventos.forEach((ev,i)=>{
+      const item=document.createElement('div');
+      item.className='event-item';
+      item.style.animationDelay=(i*0.06)+'s';
+      const imgHtml=ev.imagen?`<img class="event-thumbnail" src="${ev.imagen}" alt=""/>`:'';
+      const descHtml=ev.descripcion?`<div class="event-descripcion">${escHtml(ev.descripcion)}</div>`:'';
+      const subCount=(ev.subEventos||[]).length;
+      const subHtml=subCount?`<div class="event-subtimeline-pill">${subCount} hito${subCount===1?'':'s'} relacionados</div>`:'';
+      item.innerHTML=`
         <div class="event-spacer"></div>
         <div class="event-card">
           ${imgHtml}
           <div class="event-fecha">${escHtml(ev.fecha||'—')}</div>
           <div class="event-titulo">${escHtml(ev.titulo)}</div>
           ${descHtml}
+          ${subHtml}
         </div>
         <div class="event-connector"></div>
         <div class="event-dot"></div>
         <div class="event-connector"></div>
-        <div class="event-spacer"></div>
-      `;
-
-      item.querySelector('.event-card').addEventListener('click', () => verEventoFromCache(ev.id, tl));
+        <div class="event-spacer"></div>`;
+      item.querySelector('.event-card').addEventListener('click',()=>verEventoFromCache(ev.id,tl));
       container.appendChild(item);
     });
   }
 }
 
-async function renderTimeline(){
-  const tl = await getTimeline(activeTimelineId);
-  if(!tl) return;
-  renderTimelineFromCache(tl);
-}
-
 // ─── EDITAR LÍNEA DE TIEMPO ───────────────────────────────
 function openModalEditarTimeline(){
-  if(!isRoot){ toast('Solo el administrador puede editar la línea de tiempo.'); return; }
-  const tl = _timelineCache[activeTimelineId];
-  if(!tl) return;
-
-  document.getElementById('edit-tl-nombre').value = tl.nombre || '';
-  document.getElementById('edit-tl-desc').value   = tl.desc   || '';
-  selectEditColor(tl.color || '#E8845A');
+  const tl=_timelineCache[activeTimelineId];
+  if(!tl||!canEdit(tl)){ toast('No tienes permiso para editar esta línea de tiempo.'); return; }
+  document.getElementById('edit-tl-nombre').value=tl.nombre||'';
+  document.getElementById('edit-tl-desc').value=tl.desc||'';
+  selectEditColor(tl.color||'#E8845A');
   showModal('modal-editar-tl');
   document.getElementById('edit-tl-nombre').focus();
 }
 
 async function guardarEdicionTimeline(){
-  const nombre = document.getElementById('edit-tl-nombre').value.trim();
+  const nombre=document.getElementById('edit-tl-nombre').value.trim();
   if(!nombre){ shake(document.getElementById('edit-tl-nombre')); return; }
-  const desc  = document.getElementById('edit-tl-desc').value.trim();
-  const color = selectedEditColor;
-
-  // Guardar el estado anterior por si hay que revertir
-  const tl      = _timelineCache[activeTimelineId];
-  const updated = { ...tl, nombre, desc, color };
-
-  // Actualizar caché y UI de forma inmediata (optimistic update)
-  _timelineCache[activeTimelineId] = updated;
-  document.getElementById('editor-title').textContent = nombre;
-  document.getElementById('editor-desc').textContent  = desc;
-  document.documentElement.style.setProperty('--accent', color);
-  document.documentElement.style.setProperty('--accent-glow', hexToAlpha(color, 0.18));
-
+  const desc=document.getElementById('edit-tl-desc').value.trim();
+  const color=selectedEditColor;
+  const tl=_timelineCache[activeTimelineId];
+  _timelineCache[activeTimelineId]={...tl,nombre,desc,color};
+  document.getElementById('editor-title').textContent=nombre;
+  document.getElementById('editor-desc').textContent=desc;
+  document.documentElement.style.setProperty('--accent',color);
+  document.documentElement.style.setProperty('--accent-glow',hexToAlpha(color,0.18));
   hideModal('modal-editar-tl');
   toast('Línea de tiempo actualizada ✓');
-
-  // Persistir en Firestore en segundo plano
   try {
-    await updateTimeline(activeTimelineId, { nombre, desc, color });
+    await updateTimeline(activeTimelineId,{nombre,desc,color});
   } catch(e){
-    // Revertir si falla
-    _timelineCache[activeTimelineId] = tl;
-    document.getElementById('editor-title').textContent = tl.nombre;
-    document.getElementById('editor-desc').textContent  = tl.desc || '';
-    document.documentElement.style.setProperty('--accent', tl.color || '#E8845A');
-    document.documentElement.style.setProperty('--accent-glow', hexToAlpha(tl.color || '#E8845A', 0.18));
+    _timelineCache[activeTimelineId]=tl;
+    document.getElementById('editor-title').textContent=tl.nombre;
+    document.getElementById('editor-desc').textContent=tl.desc||'';
     toast('Error al guardar. Intenta de nuevo.');
     console.error(e);
   }
 }
 
 function selectEditColor(color){
-  selectedEditColor = color;
+  selectedEditColor=color;
   document.querySelectorAll('.edit-tl-color').forEach(btn=>{
-    btn.classList.toggle('selected', btn.dataset.color === color);
+    btn.classList.toggle('selected',btn.dataset.color===color);
   });
 }
 
-// ─── MODAL NUEVO/EDITAR EVENTO ────────────────────────────
+async function eliminarTimeline(){
+  const tl=_timelineCache[activeTimelineId];
+  if(!tl||!canEdit(tl)){ toast('No tienes permiso para eliminar esta línea de tiempo.'); return; }
+  if(!confirm(`¿Eliminar la línea de tiempo "${tl.nombre}"?`)) return;
+  try {
+    await deleteTimeline(activeTimelineId);
+    toast('Línea de tiempo eliminada');
+    await renderHome();
+  } catch(e){ toast('Error al eliminar.'); console.error(e); }
+}
+
+// ─── MODAL EVENTO ─────────────────────────────────────────
 function openModalEvento(eventId=null){
-  if(!isRoot){ toast('Solo el administrador puede editar eventos.'); return; }
+  const tl=_timelineCache[activeTimelineId];
+  if(!tl||!canEdit(tl)){ toast('No tienes permiso para editar esta línea de tiempo.'); return; }
 
-  isSavingEvent = false;
-  const btnGuardar = document.getElementById('btn-guardar-evento');
-  btnGuardar.disabled = false;
-  btnGuardar.textContent = 'Guardar evento';
+  isSavingEvent=false;
+  const btnGuardar=document.getElementById('btn-guardar-evento');
+  btnGuardar.disabled=false;
+  btnGuardar.textContent='Guardar evento';
 
-  editingEventId   = eventId;
-  pendingImageData = null;
+  editingEventId=eventId;
+  pendingImageData=null;
   resetImagenUI();
+  resetSubtimelineEditor();
 
-  const titulo  = document.getElementById('modal-evento-titulo');
-  const btnElim = document.getElementById('btn-eliminar-evento');
+  const titulo=document.getElementById('modal-evento-titulo');
+  const btnElim=document.getElementById('btn-eliminar-evento');
 
   if(eventId){
-    const tl = _timelineCache[activeTimelineId];
-    const ev = tl ? (tl.eventos||[]).find(e=>e.id===eventId) : null;
+    const ev=(tl.eventos||[]).find(e=>e.id===eventId);
     if(ev){
-      titulo.textContent = 'Editar evento';
-      document.getElementById('ev-titulo').value      = ev.titulo||'';
-      document.getElementById('ev-fecha').value       = ev.fecha||'';
-      document.getElementById('ev-descripcion').value = ev.descripcion||'';
+      titulo.textContent='Editar evento';
+      document.getElementById('ev-titulo').value=ev.titulo||'';
+      document.getElementById('ev-fecha').value=ev.fecha||'';
+      document.getElementById('ev-descripcion').value=ev.descripcion||'';
       if(ev.imagen){ showImagePreview(ev.imagen); pendingImageData=ev.imagen; }
+      resetSubtimelineEditor(ev.subEventos||[]);
       btnElim.classList.remove('hidden');
       showModal('modal-evento');
-    } else {
-      getTimeline(activeTimelineId).then(tl=>{
-        const ev2 = (tl.eventos||[]).find(e=>e.id===eventId);
-        if(!ev2) return;
-        titulo.textContent = 'Editar evento';
-        document.getElementById('ev-titulo').value      = ev2.titulo||'';
-        document.getElementById('ev-fecha').value       = ev2.fecha||'';
-        document.getElementById('ev-descripcion').value = ev2.descripcion||'';
-        if(ev2.imagen){ showImagePreview(ev2.imagen); pendingImageData=ev2.imagen; }
-        btnElim.classList.remove('hidden');
-        showModal('modal-evento');
-      });
     }
   } else {
-    titulo.textContent = 'Nuevo evento';
-    document.getElementById('ev-titulo').value      = '';
-    document.getElementById('ev-fecha').value       = '';
-    document.getElementById('ev-descripcion').value = '';
+    titulo.textContent='Nuevo evento';
+    document.getElementById('ev-titulo').value='';
+    document.getElementById('ev-fecha').value='';
+    document.getElementById('ev-descripcion').value='';
+    resetSubtimelineEditor();
     btnElim.classList.add('hidden');
     showModal('modal-evento');
     document.getElementById('ev-titulo').focus();
@@ -702,39 +731,33 @@ function openModalEvento(eventId=null){
 
 async function guardarEvento(){
   if(isSavingEvent) return;
-
-  const tituloVal = document.getElementById('ev-titulo').value.trim();
+  const tituloVal=document.getElementById('ev-titulo').value.trim();
   if(!tituloVal){ shake(document.getElementById('ev-titulo')); return; }
 
-  isSavingEvent = true;
-  const btnGuardar = document.getElementById('btn-guardar-evento');
-  btnGuardar.disabled = true;
-  btnGuardar.textContent = 'Guardando…';
+  isSavingEvent=true;
+  const btnGuardar=document.getElementById('btn-guardar-evento');
+  btnGuardar.disabled=true;
+  btnGuardar.textContent='Guardando…';
 
   try {
-    const tl      = await getTimeline(activeTimelineId);
-    const eventos = [...(tl.eventos || [])];
-    const fechaVal = document.getElementById('ev-fecha').value.trim();
-    const descVal  = document.getElementById('ev-descripcion').value.trim();
+    const tl=await getTimeline(activeTimelineId);
+    const eventos=[...(tl.eventos||[])];
+    const fechaVal=document.getElementById('ev-fecha').value.trim();
+    const descVal=document.getElementById('ev-descripcion').value.trim();
+    const subEventos=ordenarSubEventos(getSubtimelineFromEditor());
 
     if(editingEventId){
-      const idx = eventos.findIndex(e=>e.id===editingEventId);
-      if(idx > -1){
-        eventos[idx] = { ...eventos[idx], titulo:tituloVal, fecha:fechaVal, descripcion:descVal, imagen:pendingImageData||null };
-      }
+      const idx=eventos.findIndex(e=>e.id===editingEventId);
+      if(idx>-1) eventos[idx]={...eventos[idx],titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagen:pendingImageData||null,subEventos};
     } else {
-      eventos.push({ id:uid(), titulo:tituloVal, fecha:fechaVal, descripcion:descVal, imagen:pendingImageData||null, creadoEn:Date.now() });
+      eventos.push({id:uid(),titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagen:pendingImageData||null,subEventos,creadoEn:Date.now()});
     }
 
-    // ─── ORDENAR POR AÑO antes de guardar ────────────────
-    const eventosOrdenados = ordenarEventos(eventos);
-
+    const eventosOrdenados=ordenarEventos(eventos);
     if(_timelineCache[activeTimelineId]){
-      _timelineCache[activeTimelineId] = { ..._timelineCache[activeTimelineId], eventos: eventosOrdenados };
+      _timelineCache[activeTimelineId]={..._timelineCache[activeTimelineId],eventos:eventosOrdenados};
     }
-
-    await updateTimeline(activeTimelineId, { eventos: eventosOrdenados });
-
+    await updateTimeline(activeTimelineId,{eventos:eventosOrdenados});
     hideModal('modal-evento');
     hideModal('modal-ver');
     toast('Guardado ✓');
@@ -742,89 +765,89 @@ async function guardarEvento(){
   } catch(e){
     toast('Error al guardar. Intenta de nuevo.');
     console.error(e);
-    isSavingEvent = false;
-    btnGuardar.disabled = false;
-    btnGuardar.textContent = 'Guardar evento';
+    isSavingEvent=false;
+    btnGuardar.disabled=false;
+    btnGuardar.textContent='Guardar evento';
   }
 }
 
-// ─── ELIMINAR EVENTO (optimistic update) ─────────────────
 async function eliminarEvento(){
   if(!editingEventId) return;
   if(!confirm('¿Eliminar este evento?')) return;
-
-  const tl = _timelineCache[activeTimelineId];
+  const tl=_timelineCache[activeTimelineId];
   if(!tl) return;
-
-  const eventos = (tl.eventos||[]).filter(e=>e.id!==editingEventId);
-
-  _timelineCache[activeTimelineId] = { ...tl, eventos };
+  const eventos=(tl.eventos||[]).filter(e=>e.id!==editingEventId);
+  _timelineCache[activeTimelineId]={...tl,eventos};
   hideModal('modal-evento');
   hideModal('modal-ver');
   toast('Evento eliminado');
   renderTimelineFromCache(_timelineCache[activeTimelineId]);
-
   try {
-    await updateTimeline(activeTimelineId, { eventos });
-  } catch(e) {
-    _timelineCache[activeTimelineId] = tl;
+    await updateTimeline(activeTimelineId,{eventos});
+  } catch(e){
+    _timelineCache[activeTimelineId]=tl;
     renderTimelineFromCache(tl);
-    toast('Error al eliminar. Intenta de nuevo.');
+    toast('Error al eliminar.');
     console.error(e);
   }
 }
 
-// ─── VER EVENTO ───────────────────────────────────────────
-function verEventoFromCache(eventId, tl){
-  const ev = (tl.eventos||[]).find(e=>e.id===eventId);
+function verEventoFromCache(eventId,tl){
+  const ev=(tl.eventos||[]).find(e=>e.id===eventId);
   if(!ev) return;
-
-  document.getElementById('ver-fecha').textContent       = ev.fecha||'';
-  document.getElementById('ver-titulo').textContent      = ev.titulo;
-  document.getElementById('ver-descripcion').textContent = ev.descripcion||'';
-
-  const imgEl = document.getElementById('ver-imagen');
+  document.getElementById('ver-fecha').textContent=ev.fecha||'';
+  document.getElementById('ver-titulo').textContent=ev.titulo;
+  document.getElementById('ver-descripcion').textContent=ev.descripcion||'';
+  const imgEl=document.getElementById('ver-imagen');
   if(ev.imagen){ imgEl.src=ev.imagen; imgEl.classList.remove('hidden'); }
   else { imgEl.classList.add('hidden'); }
-
-  const btnEditar = document.getElementById('btn-editar-desde-ver');
-  if(isRoot) btnEditar.classList.remove('hidden');
+  renderSubtimelineView(ev.subEventos||[]);
+  const btnEditar=document.getElementById('btn-editar-desde-ver');
+  if(canEdit(tl)) btnEditar.classList.remove('hidden');
   else btnEditar.classList.add('hidden');
-
-  editingEventId = eventId;
+  editingEventId=eventId;
   showModal('modal-ver');
-}
-
-async function verEvento(eventId){
-  const tl = await getTimeline(activeTimelineId);
-  verEventoFromCache(eventId, tl);
 }
 
 // ─── NUEVA TIMELINE ───────────────────────────────────────
 function openModalNueva(){
-  if(!isRoot){ toast('Solo el administrador puede crear líneas de tiempo.'); return; }
-  document.getElementById('input-nombre').value = '';
-  document.getElementById('input-desc').value   = '';
+  if(!currentUser){ showAuth(); return; }
+  document.getElementById('input-nombre').value='';
+  document.getElementById('input-desc').value='';
   selectColor('#E8845A');
   showModal('modal-nueva');
 }
 
 async function crearTimeline(){
-  const nombre = document.getElementById('input-nombre').value.trim();
+  if(isCreatingTimeline) return;
+  const nombre=document.getElementById('input-nombre').value.trim();
   if(!nombre){ shake(document.getElementById('input-nombre')); return; }
-  const desc = document.getElementById('input-desc').value.trim();
+  if(!currentUser){ toast('Debes iniciar sesión primero.'); return; }
+  const desc=document.getElementById('input-desc').value.trim();
+  const btnCrear=document.getElementById('btn-crear-confirmar');
+  isCreatingTimeline=true;
+  btnCrear.disabled=true;
+  btnCrear.textContent='Creando...';
+
   try {
-    const ref = await createTimeline({ nombre, desc, color:selectedColor });
+    const ref=await createTimeline({nombre,desc,color:selectedColor});
     hideModal('modal-nueva');
     toast('Línea de tiempo creada ✓');
     await openTimeline(ref.id);
-  } catch(e){ toast('Error al crear. Intenta de nuevo.'); console.error(e); }
+  } catch(e){
+    toast(friendlyFirestoreError(e), 6000);
+    console.error('Error al crear línea de tiempo:', e);
+  } finally {
+    isCreatingTimeline=false;
+    btnCrear.disabled=false;
+    btnCrear.textContent='Crear';
+  }
 }
 
 // ─── IMAGEN ───────────────────────────────────────────────
 function resetImagenUI(){
   document.getElementById('img-placeholder').classList.remove('hidden');
-  const prev = document.getElementById('img-preview');
+  const prev=document.getElementById('img-preview');
   prev.classList.add('hidden'); prev.src='';
   document.getElementById('img-remove').classList.add('hidden');
   document.getElementById('ev-imagen').value='';
@@ -832,48 +855,44 @@ function resetImagenUI(){
 
 function showImagePreview(src){
   document.getElementById('img-placeholder').classList.add('hidden');
-  const prev = document.getElementById('img-preview');
+  const prev=document.getElementById('img-preview');
   prev.src=src; prev.classList.remove('hidden');
   document.getElementById('img-remove').classList.remove('hidden');
 }
 
 function handleImageFile(file){
   if(!file) return;
-  if(file.size > 1.5*1024*1024){ toast('Imagen muy grande. Máximo 1.5 MB.'); return; }
-  const reader = new FileReader();
-  reader.onload = e => { pendingImageData=e.target.result; showImagePreview(e.target.result); };
+  if(file.size>1.5*1024*1024){ toast('Imagen muy grande. Máximo 1.5 MB.'); return; }
+  const reader=new FileReader();
+  reader.onload=e=>{ pendingImageData=e.target.result; showImagePreview(e.target.result); };
   reader.readAsDataURL(file);
 }
 
-// ─── COLOR (modal nueva) ──────────────────────────────────
 function selectColor(color){
-  selectedColor = color;
+  selectedColor=color;
   document.querySelectorAll('.color-dot:not(.edit-tl-color)').forEach(btn=>{
-    btn.classList.toggle('selected', btn.dataset.color===color);
+    btn.classList.toggle('selected',btn.dataset.color===color);
   });
 }
 
-// ─── LOGOUT ───────────────────────────────────────────────
 async function logout(){
   invalidateCache();
   await signOut(auth);
   toast('Sesión cerrada');
 }
 
-// ─── OBSERVER AUTH ────────────────────────────────────────
+// ─── AUTH STATE ───────────────────────────────────────────
 onAuthStateChanged(auth, async user=>{
-  currentUser = user;
-  isRoot = !!(user && user.email && user.email.toLowerCase()===ROOT_EMAIL.toLowerCase());
-
+  currentUser=user;
+  isRoot=!!(user&&user.email&&user.email.toLowerCase()===ROOT_EMAIL.toLowerCase());
   if(user){
-    const screenAuth = document.getElementById('screen-auth');
+    const screenAuth=document.getElementById('screen-auth');
     if(!screenAuth.classList.contains('hidden')){
+      await renderHome();
+    } else if(document.getElementById('screen-home').classList.contains('active')){
       await renderHome();
     } else {
       updateHeader(user);
-      const btnNueva = document.getElementById('btn-nueva');
-      if(isRoot) btnNueva.classList.remove('hidden');
-      else btnNueva.classList.add('hidden');
     }
   } else {
     updateHeader(null);
@@ -881,22 +900,20 @@ onAuthStateChanged(auth, async user=>{
 });
 
 // ─── INIT ─────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', ()=>{
+document.addEventListener('DOMContentLoaded',()=>{
 
-  // Home
-  document.getElementById('btn-acceder').addEventListener('click', showAuth);
-  document.getElementById('btn-nueva').addEventListener('click', openModalNueva);
-  document.getElementById('btn-logout').addEventListener('click', logout);
+  document.getElementById('btn-acceder').addEventListener('click',showAuth);
+  document.getElementById('btn-nueva').addEventListener('click',openModalNueva);
+  document.getElementById('btn-logout').addEventListener('click',logout);
 
-  // Auth
   setupAuthTabs();
-  document.getElementById('btn-google-login').addEventListener('click', loginWithGoogle);
-  document.getElementById('btn-google-register').addEventListener('click', loginWithGoogle);
-  document.getElementById('btn-login-email').addEventListener('click', loginWithEmail);
-  document.getElementById('btn-register-email').addEventListener('click', registerWithEmail);
-  document.getElementById('btn-login-phone').addEventListener('click', sendPhoneSMS);
-  document.getElementById('btn-verify-phone').addEventListener('click', verifyPhoneCode);
-  document.getElementById('btn-auth-back').addEventListener('click', renderHome);
+  document.getElementById('btn-google-login').addEventListener('click',loginWithGoogle);
+  document.getElementById('btn-google-register').addEventListener('click',loginWithGoogle);
+  document.getElementById('btn-login-email').addEventListener('click',loginWithEmail);
+  document.getElementById('btn-register-email').addEventListener('click',registerWithEmail);
+  document.getElementById('btn-login-phone').addEventListener('click',sendPhoneSMS);
+  document.getElementById('btn-verify-phone').addEventListener('click',verifyPhoneCode);
+  document.getElementById('btn-auth-back').addEventListener('click',renderHome);
 
   ['login-email','login-password'].forEach(id=>{
     document.getElementById(id).addEventListener('keydown',e=>{ if(e.key==='Enter') loginWithEmail(); });
@@ -905,17 +922,15 @@ document.addEventListener('DOMContentLoaded', ()=>{
     document.getElementById(id).addEventListener('keydown',e=>{ if(e.key==='Enter') registerWithEmail(); });
   });
 
-  // Modal nueva timeline
   document.getElementById('modal-close-nueva').addEventListener('click',()=>hideModal('modal-nueva'));
-  document.getElementById('btn-crear-confirmar').addEventListener('click', crearTimeline);
+  document.getElementById('btn-crear-confirmar').addEventListener('click',crearTimeline);
   ['input-nombre','input-desc'].forEach(id=>{
     document.getElementById(id).addEventListener('keydown',e=>{ if(e.key==='Enter') crearTimeline(); });
   });
 
-  // Modal editar timeline
   document.getElementById('modal-close-editar-tl').addEventListener('click',()=>hideModal('modal-editar-tl'));
-  document.getElementById('btn-edit-tl').addEventListener('click', openModalEditarTimeline);
-  document.getElementById('btn-editar-tl-confirmar').addEventListener('click', guardarEdicionTimeline);
+  document.getElementById('btn-edit-tl').addEventListener('click',openModalEditarTimeline);
+  document.getElementById('btn-editar-tl-confirmar').addEventListener('click',guardarEdicionTimeline);
   ['edit-tl-nombre','edit-tl-desc'].forEach(id=>{
     document.getElementById(id).addEventListener('keydown',e=>{ if(e.key==='Enter') guardarEdicionTimeline(); });
   });
@@ -924,21 +939,22 @@ document.addEventListener('DOMContentLoaded', ()=>{
   });
   document.getElementById('modal-editar-tl').addEventListener('click',function(e){ if(e.target===this) hideModal('modal-editar-tl'); });
 
-  // Editor
-  document.getElementById('btn-back').addEventListener('click', async ()=>{
+  const btnDelTl=document.getElementById('btn-delete-tl');
+  if(btnDelTl) btnDelTl.addEventListener('click',eliminarTimeline);
+
+  document.getElementById('btn-back').addEventListener('click',async()=>{
     document.documentElement.style.setProperty('--accent','#E8845A');
     document.documentElement.style.setProperty('--accent-glow','rgba(232,132,90,0.18)');
     await renderHome();
   });
   document.getElementById('btn-add-event').addEventListener('click',()=>openModalEvento(null));
 
-  // Modal evento
   document.getElementById('modal-close-evento').addEventListener('click',()=>hideModal('modal-evento'));
-  document.getElementById('btn-guardar-evento').addEventListener('click', guardarEvento);
-  document.getElementById('btn-eliminar-evento').addEventListener('click', eliminarEvento);
+  document.getElementById('btn-guardar-evento').addEventListener('click',guardarEvento);
+  document.getElementById('btn-eliminar-evento').addEventListener('click',eliminarEvento);
+  document.getElementById('btn-add-sub-event').addEventListener('click',()=>addSubtimelineRow());
 
-  // Imagen
-  const uploadArea = document.getElementById('img-upload-area');
+  const uploadArea=document.getElementById('img-upload-area');
   uploadArea.addEventListener('click',()=>document.getElementById('ev-imagen').click());
   document.getElementById('ev-imagen').addEventListener('change',e=>handleImageFile(e.target.files[0]));
   document.getElementById('img-remove').addEventListener('click',e=>{ e.stopPropagation(); pendingImageData=null; resetImagenUI(); });
@@ -946,17 +962,14 @@ document.addEventListener('DOMContentLoaded', ()=>{
   uploadArea.addEventListener('dragleave',()=>{ uploadArea.style.borderColor=''; });
   uploadArea.addEventListener('drop',e=>{ e.preventDefault(); uploadArea.style.borderColor=''; const f=e.dataTransfer.files[0]; if(f&&f.type.startsWith('image/')) handleImageFile(f); });
 
-  // Modal ver
   document.getElementById('modal-close-ver').addEventListener('click',()=>hideModal('modal-ver'));
   document.getElementById('btn-editar-desde-ver').addEventListener('click',()=>{ const id=editingEventId; hideModal('modal-ver'); openModalEvento(id); });
 
-  // Color picker (modal nueva)
   document.querySelectorAll('.color-dot:not(.edit-tl-color)').forEach(btn=>{
     btn.addEventListener('click',()=>selectColor(btn.dataset.color));
   });
   selectColor('#E8845A');
 
-  // Cerrar modales al hacer clic fuera
   ['modal-nueva','modal-evento','modal-ver'].forEach(id=>{
     document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) hideModal(id); });
   });
