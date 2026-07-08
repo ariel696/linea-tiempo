@@ -67,3 +67,6 @@ node_modules/
 
 # dataconnect generated files
 .dataconnect
+# Archivos temporales de texto (ej: descargas para copiar/pegar código)
+# que a veces terminan guardados por error dentro del proyecto.
+*.txt
