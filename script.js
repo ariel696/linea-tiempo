@@ -1030,6 +1030,9 @@ onAuthStateChanged(auth, async user=>{
   // Muestra la nota de deploy solo si el usuario logueado es root.
   document.getElementById('nota-deploy-root').classList.toggle('hidden', !isRoot);
 
+  // Muestra el botón para volver a "Lo Mío" solo si el usuario es root.
+  document.getElementById('btn-lo-mio-root').classList.toggle('hidden', !isRoot);
+
   if(user){
     const screenAuth=document.getElementById('screen-auth');
     if(!screenAuth.classList.contains('hidden')){
