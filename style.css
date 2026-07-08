@@ -1199,3 +1199,86 @@ body::before {
 
 .home-timeline-section .timeline-events { min-height: 280px; }
 .home-timeline-section .timeline-empty { min-height: 280px; }
+
+/* ─── SELECCIÓN MÚLTIPLE (borrar varias líneas de tiempo) ─── */
+
+/*
+  "justify-content: space-between" separa el título a la izquierda de
+  los botones de selección a la derecha, y "align-items: center" los
+  alinea verticalmente entre sí aunque tengan alturas distintas.
+*/
+.timelines-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.bulk-count {
+  font-size: 13px;
+  color: var(--text-dim, #999);
+}
+
+/* El cuadradito del checkbox, en la esquina superior izquierda de cada tarjeta. */
+.card-checkbox {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+}
+
+.card-checkbox-input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+/*
+  Cuando una tarjeta es "seleccionable" (modo selección activo),
+  cambiamos el cursor para dar la pista de que el clic ahora marca
+  en vez de abrir la línea de tiempo.
+*/
+.timeline-card.seleccionable {
+  cursor: pointer;
+  position: relative;
+}
+
+/* ─── NOTA DE DEPLOY (solo visible para el usuario root) ─── */
+.nota-deploy-root {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  max-width: 520px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #999;
+  font-size: 11px;
+  line-height: 1.5;
+  z-index: 50;
+}
+
+.nota-deploy-root code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #ccc;
+}

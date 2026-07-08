@@ -59,7 +59,21 @@
       </section>
 
       <section class="timelines-section">
-        <h2 class="section-title">Líneas de tiempo</h2>
+        <div class="timelines-section-header">
+          <h2 class="section-title">Líneas de tiempo</h2>
+          <div class="bulk-actions">
+            <!--
+              Estos botones empiezan ocultos (clase "hidden"). El
+              script.js los va mostrando/ocultando según haga falta:
+              "Seleccionar" activa el modo, y una vez activo aparecen
+              "Eliminar seleccionadas" y "Cancelar".
+            -->
+            <button class="btn-mini hidden" id="btn-activar-seleccion">Seleccionar</button>
+            <span class="bulk-count hidden" id="bulk-count">0 seleccionadas</span>
+            <button class="btn-danger-sm hidden" id="btn-eliminar-seleccionadas">🗑 Eliminar seleccionadas</button>
+            <button class="btn-mini hidden" id="btn-cancelar-seleccion">Cancelar</button>
+          </div>
+        </div>
         <div id="timelines-grid" class="timelines-grid">
           <div class="empty-state" id="empty-state">
             <div class="empty-icon">◎</div>
@@ -302,6 +316,19 @@
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!--
+    Nota de deploy, solo visible para el usuario root (se muestra/oculta
+    desde script.js según quién inició sesión). El atributo "title" es
+    para dejar más contexto si alguna vez se necesita, pero el texto
+    principal ya queda visible directamente.
+  -->
+  <div id="nota-deploy-root" class="nota-deploy-root hidden">
+    Este proyecto tiene su propio Firebase (<code>linea-tiempo-d4a50</code>), independiente de otros proyectos.
+    Para publicar cambios: <code>firebase deploy --only hosting</code> (sin build, es HTML/CSS/JS puro).
+    <br/>
+    Las imágenes de los eventos se guardan con Cloudinary (cuenta compartida con Kokoro), no en Firestore.
+  </div>
 
   <script type="module" src="script.js"></script>
 </body>

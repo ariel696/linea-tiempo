@@ -1026,10 +1026,6 @@ async function logout(){
 onAuthStateChanged(auth, async user=>{
   currentUser=user;
   isRoot=!!(user&&user.email&&user.email.toLowerCase()===ROOT_EMAIL.toLowerCase());
-
-  // Muestra la nota de deploy solo si el usuario logueado es root.
-  document.getElementById('nota-deploy-root').classList.toggle('hidden', !isRoot);
-
   if(user){
     const screenAuth=document.getElementById('screen-auth');
     if(!screenAuth.classList.contains('hidden')){
