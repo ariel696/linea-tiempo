@@ -24,41 +24,13 @@
     </header>
     <main class="home-main">
       <div class="home-hero">
-        <h1>Tus historias,<br/><em>en orden.</em></h1>
-        <p class="hero-sub">Crea líneas de tiempo visuales para organizar eventos, proyectos o recuerdos.</p>
+        <h1>NUESTRA LINEA DE TIEMPO</h1>
+        <p class="hero-sub">NUESTRA HISTORIA EN LINEAS DE TIEMPO<br/>TODAS EN UN SOLO LUGAR.</p>
         <button class="btn-primary hidden" id="btn-nueva">
           <span class="btn-icon">+</span> Nueva línea de tiempo
         </button>
       </div>
-
-      <!-- ====== LÍNEA DE TIEMPO PRINCIPAL EMBEBIDA ====== -->
-      <section class="home-timeline-section">
-        <div class="home-timeline-header">
-          <h2 class="home-timeline-title" id="home-tl-title">Principal</h2>
-          <span class="home-timeline-desc" id="home-tl-desc"></span>
-          <button class="btn-mini hidden" id="btn-edit-home-principal">Editar principal</button>
-        </div>
-        <div class="home-zoom-controls">
-          <button class="zoom-btn" id="home-btn-zoom-out" title="Alejar">−</button>
-          <span class="zoom-label" id="home-zoom-label">100%</span>
-          <button class="zoom-btn" id="home-btn-zoom-in" title="Acercar">+</button>
-          <button class="zoom-reset" id="home-btn-zoom-reset">Reset</button>
-          <span class="zoom-hint">Ctrl + scroll para zoom · Arrastra para mover</span>
-        </div>
-        <div class="timeline-scroll-wrapper home-tl-wrapper" id="home-timeline-scroll-wrapper">
-          <div class="timeline-canvas" id="home-timeline-canvas">
-            <div class="timeline-container" id="home-timeline-container">
-              <div class="timeline-line" id="home-timeline-line"></div>
-              <div class="timeline-events" id="home-timeline-events"></div>
-              <div class="timeline-empty" id="home-timeline-empty" style="display:none">
-                <p>No hay eventos aún.</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="timelines-section">
+<section class="timelines-section">
         <div class="timelines-section-header">
           <h2 class="section-title">Líneas de tiempo</h2>
           <div class="bulk-actions">
@@ -82,6 +54,12 @@
         </div>
       </section>
     </main>
+    <footer id="nota-deploy-root" class="nota-deploy-root hidden">
+      Este proyecto tiene su propio Firebase (<code>linea-tiempo-d4a50</code>), independiente de otros proyectos.
+      Para publicar cambios: <code>firebase deploy --only hosting</code> (sin build, es HTML/CSS/JS puro).
+      <br/>
+      Las imágenes de los eventos se guardan con Cloudinary (cuenta compartida con Kokoro), no en Firestore.
+    </footer>
   </div>
 
   <!-- ====== PANTALLA AUTH ====== -->
@@ -192,7 +170,7 @@
 
   <!-- ====== MODAL: EDITAR LÍNEA DE TIEMPO ====== -->
   <div id="modal-editar-tl" class="modal-overlay hidden">
-    <div class="modal">
+    <div class="modal modal-timeline-edit">
       <button class="modal-close" id="modal-close-editar-tl">✕</button>
       <h2>Editar línea de tiempo</h2>
       <div class="form-group">
@@ -213,6 +191,13 @@
           <button class="color-dot edit-tl-color" data-color="#E8D45A" style="background:#E8D45A"></button>
           <button class="color-dot edit-tl-color" data-color="#AE5AE8" style="background:#AE5AE8"></button>
         </div>
+      </div>
+      <div class="form-group">
+        <div class="timeline-notes-edit-header">
+          <label>Descripciones de lectura <span class="opcional">(opcional)</span></label>
+          <button type="button" class="btn-mini" id="btn-add-timeline-note">+ Descripción</button>
+        </div>
+        <div class="timeline-notes-editor" id="timeline-notes-editor"></div>
       </div>
       <button class="btn-primary full" id="btn-editar-tl-confirmar">Guardar cambios</button>
     </div>
@@ -253,6 +238,7 @@
               <p>Agrega tu primer evento con el botón <strong>"+ Evento"</strong></p>
             </div>
           </div>
+          <div class="timeline-notes-panel hidden" id="timeline-notes-panel"></div>
         </div>
       </div>
     </div>
@@ -316,19 +302,6 @@
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
-
-  <!--
-    Nota de deploy, solo visible para el usuario root (se muestra/oculta
-    desde script.js según quién inició sesión). El atributo "title" es
-    para dejar más contexto si alguna vez se necesita, pero el texto
-    principal ya queda visible directamente.
-  -->
-  <div id="nota-deploy-root" class="nota-deploy-root hidden">
-    Este proyecto tiene su propio Firebase (<code>linea-tiempo-d4a50</code>), independiente de otros proyectos.
-    Para publicar cambios: <code>firebase deploy --only hosting</code> (sin build, es HTML/CSS/JS puro).
-    <br/>
-    Las imágenes de los eventos se guardan con Cloudinary (cuenta compartida con Kokoro), no en Firestore.
-  </div>
 
   <!--
     Botón para volver a "Lo Mío", solo visible para el usuario root

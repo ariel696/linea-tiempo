@@ -20,6 +20,7 @@ import {
   collection,
   doc,
   addDoc,
+  setDoc,
   updateDoc,
   deleteDoc,
   getDocs,
@@ -31,12 +32,12 @@ import {
 
 // ─── CONFIGURACIÓN FIREBASE ───────────────────────────────
 const firebaseConfig = {
-  apiKey: "AIzaSyAbMpE02ZcU3OSmr0VZOAnkO_bJFNttU3Q",
-  authDomain: "linea-tiempo-d4a50.firebaseapp.com",
-  projectId: "linea-tiempo-d4a50",
-  storageBucket: "linea-tiempo-d4a50.firebasestorage.app",
-  messagingSenderId: "475632320193",
-  appId: "1:475632320193:web:21c0f5a55fa97a0f9cde40"
+  apiKey: "AIzaSyApm4Mek3Hqe8Gpf9sV31LAfuE_R_pEuxs",
+  authDomain: "linea-tiempo-16fa4.firebaseapp.com",
+  projectId: "linea-tiempo-16fa4",
+  storageBucket: "linea-tiempo-16fa4.firebasestorage.app",
+  messagingSenderId: "137078435316",
+  appId: "1:137078435316:web:be4bcebecc59b3eadc9da1"
 };
 
 const ROOT_EMAIL = "arielriquelme08@gmail.com";
@@ -90,12 +91,15 @@ let editingEventId     = null;
 let selectedColor      = "#E8845A";
 let selectedEditColor  = "#E8845A";
 let pendingImageData   = null;
+let eventDraftSnapshot = null;
 let confirmationResult = null;
 let isSavingEvent      = false;
 let isCreatingTimeline = false;
 
 let _timelinesCache = null;
 let _timelineCache  = {};
+let _pendingTimelineWrites = {};
+let _renderHomeSeq = 0;
 
 // Estado del "modo selección" para borrar varias líneas de tiempo a la vez.
 let modoSeleccion = false;
@@ -104,6 +108,7 @@ let idsSeleccionados = new Set();
 function invalidateCache(id){
   _timelinesCache = null;
   if(id) delete _timelineCache[id];
+  if(id) delete _pendingTimelineWrites[id];
 }
 
 let zoomLevel     = 1.0;
@@ -221,7 +226,7 @@ function setupDragScroll(){
   if(!wrapper) return;
   let isDragging=false,startX,startY,scrollLeft,scrollTop;
   wrapper.addEventListener('mousedown',e=>{
-    if(e.target.closest('.event-card')||e.target.closest('.zoom-controls')) return;
+    if(e.target.closest('.event-card')||e.target.closest('.timeline-note-card')||e.target.closest('.zoom-controls')) return;
     isDragging=true; startX=e.pageX-wrapper.offsetLeft; startY=e.pageY-wrapper.offsetTop;
     scrollLeft=wrapper.scrollLeft; scrollTop=wrapper.scrollTop; wrapper.style.cursor='grabbing';
   });
@@ -261,7 +266,7 @@ function setupHomeDragScroll(){
   if(!wrapper) return;
   let isDragging=false,startX,startY,scrollLeft,scrollTop;
   wrapper.addEventListener('mousedown',e=>{
-    if(e.target.closest('.event-card')) return;
+    if(e.target.closest('.event-card')||e.target.closest('.timeline-note-card')) return;
     isDragging=true; startX=e.pageX-wrapper.offsetLeft; startY=e.pageY-wrapper.offsetTop;
     scrollLeft=wrapper.scrollLeft; scrollTop=wrapper.scrollTop; wrapper.style.cursor='grabbing';
   });
@@ -278,29 +283,53 @@ async function fetchTimelines(){
   if(_timelinesCache) return _timelinesCache;
   const q=query(collection(db,'timelines'),orderBy('creadoEn','desc'));
   const snap=await getDocs(q);
-  _timelinesCache=snap.docs.map(d=>({id:d.id,...d.data()}));
+  const byId=new Map();
+  snap.docs.forEach(d=>byId.set(d.id,{id:d.id,...d.data()}));
+  _timelinesCache=[...byId.values()];
   return _timelinesCache;
 }
 
-async function createTimeline(data){
-  const ref=await addDoc(collection(db,'timelines'),{
+function createTimeline(data){
+  const ref=doc(collection(db,'timelines'));
+  const writePromise=setDoc(ref,{
     ...data,
     eventos:[],
     creadoEn:serverTimestamp(),
     ownerId:currentUser.uid,
     ownerName:currentUser.displayName||currentUser.email||'Usuario'
   });
-  invalidateCache();
-  return ref;
+  const createdTimeline = {
+    id: ref.id,
+    ...data,
+    eventos: [],
+    ownerId: currentUser.uid,
+    ownerName: currentUser.displayName || currentUser.email || 'Usuario'
+  };
+  _timelineCache[ref.id] = createdTimeline;
+  _timelinesCache = [createdTimeline, ...((_timelinesCache||[]).filter(t=>t.id!==ref.id))];
+  _pendingTimelineWrites[ref.id] = writePromise;
+  writePromise.catch(()=>{ delete _pendingTimelineWrites[ref.id]; });
+  return { ref, writePromise };
 }
 
 async function updateTimeline(id,data){
-  await updateDoc(doc(db,'timelines',id),data);
   if(_timelineCache[id]) _timelineCache[id]={..._timelineCache[id],...data};
   if(_timelinesCache){
     const idx=_timelinesCache.findIndex(t=>t.id===id);
     if(idx>-1) _timelinesCache[idx]={..._timelinesCache[idx],...data};
   }
+  if(_pendingTimelineWrites[id]){
+    const pending=_pendingTimelineWrites[id];
+    pending.then(async()=>{
+      try {
+        await updateDoc(doc(db,'timelines',id),data);
+      } catch(e){
+        console.error(e);
+      }
+    }).catch(()=>{});
+    return;
+  }
+  await updateDoc(doc(db,'timelines',id),data);
 }
 
 async function deleteTimeline(id){
@@ -323,6 +352,155 @@ function extraerAnio(fecha){
   return match?parseInt(match[0]):Infinity;
 }
 
+function getYearLabel(fecha){
+  const match=String(fecha||'').match(/\d{4}/);
+  return match ? match[0] : '';
+}
+function normalizeTimelineNotes(notes){
+  return [...(notes||[])].map(note=>{
+    const x=Number(note.x);
+    const y=Number(note.y);
+    return {
+      id: note.id || uid(),
+      texto: String(note.texto||'').trim(),
+      color: note.color || '#5A8EE8',
+      eventIds: [...new Set([...(note.eventIds||[])].filter(Boolean))],
+      x: Number.isFinite(x) ? x : null,
+      y: Number.isFinite(y) ? y : null
+    };
+  }).filter(note=>note.texto || note.eventIds.length>0);
+}
+
+function findTimelineNoteForEvent(notes,eventId){
+  return notes.find(note=>note.eventIds.includes(eventId)) || null;
+}
+
+function getTimelineNotesFromEditor(){
+  return [...document.querySelectorAll('.timeline-note-row')].map(row=>{
+    const x=Number(row.dataset.x);
+    const y=Number(row.dataset.y);
+    return {
+      id: row.dataset.noteId || uid(),
+      texto: row.querySelector('.timeline-note-text').value.trim(),
+      color: row.querySelector('.timeline-note-color').value || '#5A8EE8',
+      eventIds: [...row.querySelectorAll('.timeline-note-event:checked')].map(input=>input.value),
+      x: Number.isFinite(x) ? x : null,
+      y: Number.isFinite(y) ? y : null
+    };
+  }).filter(note=>note.texto || note.eventIds.length>0);
+}
+
+function addTimelineNoteRow(note={},eventos=[]){
+  const editor=document.getElementById('timeline-notes-editor');
+  if(!editor) return;
+  const row=document.createElement('div');
+  const noteId=note.id||uid();
+  const selected=new Set(note.eventIds||[]);
+  const color=note.color||'#5A8EE8';
+  row.className='timeline-note-row';
+  row.dataset.noteId=noteId;
+  if(note.x!=null) row.dataset.x=note.x;
+  if(note.y!=null) row.dataset.y=note.y;
+  const eventosHtml=eventos.length?eventos.map(ev=>{
+    const year=getYearLabel(ev.fecha);
+    return `<label class="timeline-note-event-option"><input class="timeline-note-event" type="checkbox" value="${escHtml(ev.id)}" ${selected.has(ev.id)?'checked':''}/><span>${escHtml(ev.titulo||'Sin titulo')}${year?` · ${escHtml(year)}`:''}</span></label>`;
+  }).join(''):'<span class="timeline-note-empty">Agrega eventos para poder relacionarlos.</span>';
+  row.innerHTML=`
+    <textarea class="timeline-note-text" rows="2" placeholder="Ej: La llegada de Atari cambia la forma de entender las consolas.">${escHtml(note.texto||'')}</textarea>
+    <input class="timeline-note-color" type="color" value="${escHtml(color)}" title="Color de la lectura"/>
+    <button type="button" class="timeline-note-remove" title="Quitar descripcion">×</button>
+    <div class="timeline-note-events">${eventosHtml}</div>`;
+  row.querySelector('.timeline-note-remove').addEventListener('click',()=>row.remove());
+  editor.appendChild(row);
+}
+
+function resetTimelineNotesEditor(notes=[],eventos=[]){
+  const editor=document.getElementById('timeline-notes-editor');
+  if(!editor) return;
+  editor.innerHTML='';
+  normalizeTimelineNotes(notes).forEach(note=>addTimelineNoteRow(note,eventos));
+}
+
+function renderTimelineNotesPanel(tl){
+  const panel=document.getElementById('timeline-notes-panel');
+  if(!panel) return;
+  const eventos=ordenarEventos(tl.eventos||[]);
+  const byId=new Map(eventos.map(ev=>[ev.id,ev]));
+  const notes=normalizeTimelineNotes(tl.lecturas||[]).filter(note=>note.texto);
+  if(notes.length===0){
+    panel.classList.add('hidden');
+    panel.innerHTML='';
+    return;
+  }
+  const puedeEditar=canEdit(tl);
+  panel.classList.remove('hidden');
+  panel.classList.toggle('timeline-notes-panel--editable',puedeEditar);
+  panel.innerHTML=notes.map((note,i)=>{
+    const chips=note.eventIds.map(id=>byId.get(id)).filter(Boolean).map(ev=>`<span>${escHtml(ev.titulo||'Sin titulo')}</span>`).join('');
+    const x=note.x==null?i*280:note.x;
+    const y=note.y==null?470:note.y;
+    return `<article class="timeline-note-card${puedeEditar?' timeline-note-card--editable':''}" data-note-id="${escHtml(note.id)}" style="--note-color:${escHtml(note.color)}; --note-glow:${hexToAlpha(note.color,0.16)}; left:${x}px; top:${y}px;">
+      <p>${escHtml(note.texto)}</p>
+      ${chips?`<div class="timeline-note-chips">${chips}</div>`:''}
+    </article>`;
+  }).join('');
+  if(puedeEditar){
+    panel.querySelectorAll('.timeline-note-card').forEach(card=>setupTimelineNoteDrag(card,tl));
+  }
+}
+
+
+function setupTimelineNoteDrag(card,tl){
+  card.addEventListener('pointerdown',e=>{
+    if(e.button!==undefined && e.button!==0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const canvas=document.getElementById('timeline-canvas');
+    if(!canvas) return;
+    const noteId=card.dataset.noteId;
+    const canvasRect=canvas.getBoundingClientRect();
+    const cardRect=card.getBoundingClientRect();
+    const offsetX=(e.clientX-cardRect.left)/zoomLevel;
+    const offsetY=(e.clientY-cardRect.top)/zoomLevel;
+    card.classList.add('dragging');
+    card.setPointerCapture(e.pointerId);
+
+    const move=ev=>{
+      ev.preventDefault();
+      const x=(ev.clientX-canvasRect.left)/zoomLevel-offsetX;
+      const y=(ev.clientY-canvasRect.top)/zoomLevel-offsetY;
+      const maxX=Math.max(0,canvas.offsetWidth-card.offsetWidth);
+      const maxY=Math.max(0,canvas.offsetHeight-card.offsetHeight);
+      const nextX=Math.max(0,Math.min(maxX,Math.round(x)));
+      const nextY=Math.max(0,Math.min(maxY,Math.round(y)));
+      card.style.left=nextX+'px';
+      card.style.top=nextY+'px';
+    };
+
+    const up=async ev=>{
+      card.classList.remove('dragging');
+      card.releasePointerCapture(ev.pointerId);
+      card.removeEventListener('pointermove',move);
+      card.removeEventListener('pointerup',up);
+      card.removeEventListener('pointercancel',up);
+      const x=parseInt(card.style.left,10)||0;
+      const y=parseInt(card.style.top,10)||0;
+      const prev=_timelineCache[tl.id]||tl;
+      const lecturas=normalizeTimelineNotes(prev.lecturas||[]).map(note=>note.id===noteId?{...note,x,y}:note);
+      _timelineCache[tl.id]={...prev,lecturas};
+      try {
+        await updateTimeline(tl.id,{lecturas});
+      } catch(err){
+        console.error(err);
+        toast('No se pudo guardar la posición de la descripción.');
+      }
+    };
+
+    card.addEventListener('pointermove',move);
+    card.addEventListener('pointerup',up);
+    card.addEventListener('pointercancel',up);
+  });
+}
 function ordenarEventos(eventos){
   return [...eventos].sort((a,b)=>extraerAnio(a.fecha)-extraerAnio(b.fecha));
 }
@@ -352,6 +530,39 @@ function addSubtimelineRow(item={}){
   editor.appendChild(row);
 }
 
+function getEventDraftSnapshot(){
+  return {
+    titulo: document.getElementById('ev-titulo').value.trim(),
+    fecha: document.getElementById('ev-fecha').value.trim(),
+    descripcion: document.getElementById('ev-descripcion').value.trim(),
+    imagen: pendingImageData || null,
+    subEventos: ordenarSubEventos(getSubtimelineFromEditor())
+  };
+}
+
+function rememberEventDraft(){
+  eventDraftSnapshot = JSON.stringify(getEventDraftSnapshot());
+}
+
+function isEventModalOpen(){
+  const modal = document.getElementById('modal-evento');
+  return modal && !modal.classList.contains('hidden');
+}
+
+function hasUnsavedEventDraft(){
+  if(!isEventModalOpen() || eventDraftSnapshot===null) return false;
+  return JSON.stringify(getEventDraftSnapshot()) !== eventDraftSnapshot;
+}
+
+function closeEventModal(force=false){
+  if(!force && hasUnsavedEventDraft()){
+    const salir = confirm('Tienes cambios sin guardar en este evento. ¿Salir y perder esos datos?');
+    if(!salir) return false;
+  }
+  hideModal('modal-evento');
+  eventDraftSnapshot = null;
+  return true;
+}
 function resetSubtimelineEditor(items=[]){
   const editor=document.getElementById('subtimeline-editor');
   editor.innerHTML='';
@@ -448,11 +659,12 @@ async function renderHomePrincipalTimeline(timelines){
       item.style.setProperty('--accent-glow',hexToAlpha(color,0.18));
       const imgHtml=ev.imagen?`<img class="event-thumbnail" src="${ev.imagen}" alt=""/>`:'';
       const descHtml=ev.descripcion?`<div class="event-descripcion">${escHtml(ev.descripcion)}</div>`:'';
+      const yearHtml=getYearLabel(ev.fecha)?`<div class="event-year">${getYearLabel(ev.fecha)}</div>`:'';
       item.innerHTML=`
         <div class="event-spacer"></div>
+        ${yearHtml}
         <div class="event-card">
           ${imgHtml}
-          <div class="event-fecha">${escHtml(ev.fecha||'—')}</div>
           <div class="event-titulo">${escHtml(ev.titulo)}</div>
           ${descHtml}
         </div>
@@ -471,19 +683,19 @@ async function renderHomePrincipalTimeline(timelines){
 }
 
 async function renderHome(){
+  const seq=++_renderHomeSeq;
   showScreen('home');
   updateHeader(currentUser);
   const grid=document.getElementById('timelines-grid');
   const empty=document.getElementById('empty-state');
-  grid.querySelectorAll('.timeline-card').forEach(c=>c.remove());
+  grid.innerHTML='';
+  grid.appendChild(empty);
 
   let timelines=[];
   try { timelines=await fetchTimelines(); } catch(e){ console.error(e); }
+  if(seq!==_renderHomeSeq) return;
 
-  renderHomePrincipalTimeline(timelines);
-
-  const principalHome=getHomePrincipalTimeline(timelines);
-  const otras=timelines.filter(tl=>!principalHome||tl.id!==principalHome.id);
+  const otras=timelines;
 
   // ¿Hay al menos una línea de tiempo que el usuario actual puede borrar?
   // Si no hay ninguna, no tiene sentido mostrarle el botón "Seleccionar".
@@ -722,6 +934,8 @@ function renderTimelineFromCache(tl){
   container.innerHTML='';
 
   const eventos=ordenarEventos(tl.eventos||[]);
+  const lecturas=normalizeTimelineNotes(tl.lecturas||[]);
+  renderTimelineNotesPanel(tl);
 
   if(eventos.length===0){
     empty.style.display='flex';
@@ -733,15 +947,22 @@ function renderTimelineFromCache(tl){
       const item=document.createElement('div');
       item.className='event-item';
       item.style.animationDelay=(i*0.06)+'s';
+      const note=findTimelineNoteForEvent(lecturas,ev.id);
+      if(note){
+        item.classList.add('event-item--noted');
+        item.style.setProperty('--note-color',note.color);
+        item.style.setProperty('--note-glow',hexToAlpha(note.color,0.16));
+      }
       const imgHtml=ev.imagen?`<img class="event-thumbnail" src="${ev.imagen}" alt=""/>`:'';
       const descHtml=ev.descripcion?`<div class="event-descripcion">${escHtml(ev.descripcion)}</div>`:'';
+      const yearHtml=getYearLabel(ev.fecha)?`<div class="event-year">${getYearLabel(ev.fecha)}</div>`:'';
       const subCount=(ev.subEventos||[]).length;
       const subHtml=subCount?`<div class="event-subtimeline-pill">${subCount} hito${subCount===1?'':'s'} relacionados</div>`:'';
       item.innerHTML=`
         <div class="event-spacer"></div>
+        ${yearHtml}
         <div class="event-card">
           ${imgHtml}
-          <div class="event-fecha">${escHtml(ev.fecha||'—')}</div>
           <div class="event-titulo">${escHtml(ev.titulo)}</div>
           ${descHtml}
           ${subHtml}
@@ -763,6 +984,7 @@ function openModalEditarTimeline(){
   document.getElementById('edit-tl-nombre').value=tl.nombre||'';
   document.getElementById('edit-tl-desc').value=tl.desc||'';
   selectEditColor(tl.color||'#E8845A');
+  resetTimelineNotesEditor(tl.lecturas||[],ordenarEventos(tl.eventos||[]));
   showModal('modal-editar-tl');
   document.getElementById('edit-tl-nombre').focus();
 }
@@ -772,16 +994,18 @@ async function guardarEdicionTimeline(){
   if(!nombre){ shake(document.getElementById('edit-tl-nombre')); return; }
   const desc=document.getElementById('edit-tl-desc').value.trim();
   const color=selectedEditColor;
+  const lecturas=getTimelineNotesFromEditor();
   const tl=_timelineCache[activeTimelineId];
-  _timelineCache[activeTimelineId]={...tl,nombre,desc,color};
+  _timelineCache[activeTimelineId]={...tl,nombre,desc,color,lecturas};
   document.getElementById('editor-title').textContent=nombre;
   document.getElementById('editor-desc').textContent=desc;
   document.documentElement.style.setProperty('--accent',color);
   document.documentElement.style.setProperty('--accent-glow',hexToAlpha(color,0.18));
+  renderTimelineFromCache(_timelineCache[activeTimelineId]);
   hideModal('modal-editar-tl');
   toast('Línea de tiempo actualizada ✓');
   try {
-    await updateTimeline(activeTimelineId,{nombre,desc,color});
+    await updateTimeline(activeTimelineId,{nombre,desc,color,lecturas});
   } catch(e){
     _timelineCache[activeTimelineId]=tl;
     document.getElementById('editor-title').textContent=tl.nombre;
@@ -838,6 +1062,7 @@ function openModalEvento(eventId=null){
       resetSubtimelineEditor(ev.subEventos||[]);
       btnElim.classList.remove('hidden');
       showModal('modal-evento');
+      rememberEventDraft();
     }
   } else {
     titulo.textContent='Nuevo evento';
@@ -847,6 +1072,7 @@ function openModalEvento(eventId=null){
     resetSubtimelineEditor();
     btnElim.classList.add('hidden');
     showModal('modal-evento');
+    rememberEventDraft();
     document.getElementById('ev-titulo').focus();
   }
 }
@@ -880,7 +1106,7 @@ async function guardarEvento(){
       _timelineCache[activeTimelineId]={..._timelineCache[activeTimelineId],eventos:eventosOrdenados};
     }
     await updateTimeline(activeTimelineId,{eventos:eventosOrdenados});
-    hideModal('modal-evento');
+    closeEventModal(true);
     hideModal('modal-ver');
     toast('Guardado ✓');
     renderTimelineFromCache(_timelineCache[activeTimelineId]);
@@ -900,7 +1126,7 @@ async function eliminarEvento(){
   if(!tl) return;
   const eventos=(tl.eventos||[]).filter(e=>e.id!==editingEventId);
   _timelineCache[activeTimelineId]={...tl,eventos};
-  hideModal('modal-evento');
+  closeEventModal(true);
   hideModal('modal-ver');
   toast('Evento eliminado');
   renderTimelineFromCache(_timelineCache[activeTimelineId]);
@@ -952,10 +1178,14 @@ async function crearTimeline(){
   btnCrear.textContent='Creando...';
 
   try {
-    const ref=await createTimeline({nombre,desc,color:selectedColor});
+    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor});
     hideModal('modal-nueva');
-    toast('Línea de tiempo creada ✓');
     await openTimeline(ref.id);
+    toast('Línea de tiempo creada ✓');
+    writePromise.catch(e=>{
+      console.error('La línea se abrió, pero no se pudo guardar todavía en Firebase:', e);
+      toast('La línea se abrió, pero Firebase no respondió. Revisa tu conexión o reglas.', 6000);
+    });
   } catch(e){
     toast(friendlyFirestoreError(e), 6000);
     console.error('Error al crear línea de tiempo:', e);
@@ -982,23 +1212,79 @@ function showImagePreview(src){
   document.getElementById('img-remove').classList.remove('hidden');
 }
 
-// Muestra "Subiendo imagen..." en el mismo lugar donde normalmente
-// dice "Haz clic para subir imagen", mientras esperamos a Cloudinary.
-function mostrarSubiendoImagen(mostrando){
+// Muestra el estado de carga en el mismo lugar donde normalmente
+// dice "Haz clic para subir imagen".
+function mostrarSubiendoImagen(mostrando, texto='Subiendo imagen...'){
   const placeholder = document.getElementById('img-placeholder');
   placeholder.querySelector('span:last-child').textContent =
-    mostrando ? 'Subiendo imagen...' : 'Haz clic para subir imagen';
+    mostrando ? texto : 'Haz clic para subir imagen';
+}
+
+function cargarImagenLocal(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('No se pudo leer la imagen'));
+    };
+    img.src = url;
+  });
+}
+
+function canvasToBlob(canvas, type, quality){
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(blob => {
+      if(blob) resolve(blob);
+      else reject(new Error('No se pudo comprimir la imagen'));
+    }, type, quality);
+  });
+}
+
+async function comprimirImagen(file){
+  const MAX_LADO = 1400;
+  const CALIDAD = 0.7;
+  const img = await cargarImagenLocal(file);
+  const anchoOriginal = img.naturalWidth || img.width;
+  const altoOriginal = img.naturalHeight || img.height;
+  const escala = Math.min(1, MAX_LADO / Math.max(anchoOriginal, altoOriginal));
+  const ancho = Math.max(1, Math.round(anchoOriginal * escala));
+  const alto = Math.max(1, Math.round(altoOriginal * escala));
+  const canvas = document.createElement('canvas');
+  canvas.width = ancho;
+  canvas.height = alto;
+
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, ancho, alto);
+  ctx.drawImage(img, 0, 0, ancho, alto);
+
+  const blob = await canvasToBlob(canvas, 'image/jpeg', CALIDAD);
+  if(blob.size >= file.size && file.size <= 900 * 1024){
+    return file;
+  }
+
+  const nombreBase = (file.name || 'imagen').replace(/\.[^.]+$/, '');
+  return new File([blob], `${nombreBase}-comprimida.jpg`, {
+    type: 'image/jpeg',
+    lastModified: Date.now()
+  });
 }
 
 async function handleImageFile(file){
   if(!file) return;
-  // Como ahora la imagen se sube a Cloudinary (no se guarda como texto
-  // en Firestore), podemos permitir archivos más grandes que antes.
-  if(file.size>10*1024*1024){ toast('Imagen muy grande. Máximo 10 MB.'); return; }
+  if(!file.type.startsWith('image/')){ toast('El archivo debe ser una imagen.'); return; }
+  if(file.size>20*1024*1024){ toast('Imagen muy grande. Máximo 20 MB.'); return; }
 
-  mostrarSubiendoImagen(true);
+  mostrarSubiendoImagen(true, 'Comprimiendo imagen...');
   try {
-    const url = await subirImagenCloudinary(file);
+    const imagenComprimida = await comprimirImagen(file);
+    mostrarSubiendoImagen(true, 'Subiendo imagen...');
+    const url = await subirImagenCloudinary(imagenComprimida);
     pendingImageData = url;
     showImagePreview(url);
   } catch(e){
@@ -1083,6 +1369,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('modal-close-editar-tl').addEventListener('click',()=>hideModal('modal-editar-tl'));
   document.getElementById('btn-edit-tl').addEventListener('click',openModalEditarTimeline);
   document.getElementById('btn-editar-tl-confirmar').addEventListener('click',guardarEdicionTimeline);
+  document.getElementById('btn-add-timeline-note').addEventListener('click',()=>{
+    const tl=_timelineCache[activeTimelineId];
+    addTimelineNoteRow({},ordenarEventos((tl&&tl.eventos)||[]));
+  });
   ['edit-tl-nombre','edit-tl-desc'].forEach(id=>{
     document.getElementById(id).addEventListener('keydown',e=>{ if(e.key==='Enter') guardarEdicionTimeline(); });
   });
@@ -1095,13 +1385,14 @@ document.addEventListener('DOMContentLoaded',()=>{
   if(btnDelTl) btnDelTl.addEventListener('click',eliminarTimeline);
 
   document.getElementById('btn-back').addEventListener('click',async()=>{
+    if(!closeEventModal()) return;
     document.documentElement.style.setProperty('--accent','#E8845A');
     document.documentElement.style.setProperty('--accent-glow','rgba(232,132,90,0.18)');
     await renderHome();
   });
   document.getElementById('btn-add-event').addEventListener('click',()=>openModalEvento(null));
 
-  document.getElementById('modal-close-evento').addEventListener('click',()=>hideModal('modal-evento'));
+  document.getElementById('modal-close-evento').addEventListener('click',()=>closeEventModal());
   document.getElementById('btn-guardar-evento').addEventListener('click',guardarEvento);
   document.getElementById('btn-eliminar-evento').addEventListener('click',eliminarEvento);
   document.getElementById('btn-add-sub-event').addEventListener('click',()=>addSubtimelineRow());
@@ -1122,12 +1413,23 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   selectColor('#E8845A');
 
-  ['modal-nueva','modal-evento','modal-ver'].forEach(id=>{
+  ['modal-nueva','modal-ver'].forEach(id=>{
     document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) hideModal(id); });
   });
+  document.getElementById('modal-evento').addEventListener('click',function(e){ if(e.target===this) closeEventModal(); });
 
   document.addEventListener('keydown',e=>{
-    if(e.key==='Escape') ['modal-nueva','modal-evento','modal-ver','modal-editar-tl'].forEach(id=>hideModal(id));
+    if(e.key==='Escape'){
+      ['modal-nueva','modal-ver','modal-editar-tl'].forEach(id=>hideModal(id));
+      closeEventModal();
+    }
+  });
+
+  window.addEventListener('beforeunload',e=>{
+    if(hasUnsavedEventDraft()){
+      e.preventDefault();
+      e.returnValue='';
+    }
   });
 
   renderHome();
