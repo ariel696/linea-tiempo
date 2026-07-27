@@ -421,6 +421,70 @@ function resetTimelineNotesEditor(notes=[],eventos=[]){
   normalizeTimelineNotes(notes).forEach(note=>addTimelineNoteRow(note,eventos));
 }
 
+
+function normalizeRelatedTimelineIds(ids){
+  return [...new Set([...(ids||[])].map(id=>String(id||'').trim()).filter(id=>id&&id!==activeTimelineId))];
+}
+
+function getRelatedTimelineIdsFromEditor(){
+  return [...document.querySelectorAll('.related-timeline-check:checked')].map(input=>input.value);
+}
+
+function resetRelatedTimelinesEditor(currentId,relatedIds=[],timelines=[]){
+  const editor=document.getElementById('related-timelines-editor');
+  if(!editor) return;
+  const selected=new Set(normalizeRelatedTimelineIds(relatedIds));
+  const options=[...(timelines||[])].filter(tl=>tl.id&&tl.id!==currentId);
+  if(options.length===0){
+    editor.innerHTML='<span class="related-timelines-empty">Crea otra linea de tiempo para poder vincularla.</span>';
+    return;
+  }
+  editor.innerHTML=options.map(tl=>{
+    const count=(tl.eventos||[]).length;
+    return `<label class="related-timeline-option">
+      <input class="related-timeline-check" type="checkbox" value="${escHtml(tl.id)}" ${selected.has(tl.id)?'checked':''}/>
+      <span><strong>${escHtml(tl.nombre||'Sin titulo')}</strong><small>${count} evento${count===1?'':'s'}</small></span>
+    </label>`;
+  }).join('');
+}
+
+async function renderRelatedTimelinesPanel(tl){
+  const section=document.getElementById('related-timelines-section');
+  const grid=document.getElementById('related-timelines-grid');
+  if(!section||!grid) return;
+  const ids=normalizeRelatedTimelineIds(tl.relatedTimelineIds||[]);
+  if(ids.length===0){
+    section.classList.add('hidden');
+    grid.innerHTML='';
+    return;
+  }
+  let timelines=_timelinesCache;
+  try {
+    if(!timelines) timelines=await fetchTimelines();
+  } catch(e){
+    console.error(e);
+    timelines=[];
+  }
+  const byId=new Map([...(timelines||[]), ...Object.values(_timelineCache||{})].map(item=>[item.id,item]));
+  const related=ids.map(id=>byId.get(id)).filter(Boolean);
+  if(related.length===0){
+    section.classList.add('hidden');
+    grid.innerHTML='';
+    return;
+  }
+  section.classList.remove('hidden');
+  grid.innerHTML=related.map(item=>{
+    const count=(item.eventos||[]).length;
+    const desc=item.desc?`<p>${escHtml(item.desc)}</p>`:'';
+    return `<button type="button" class="related-timeline-card" data-id="${escHtml(item.id)}" style="--related-color:${escHtml(item.color||'#5A8EE8')}; --related-glow:${hexToAlpha(item.color||'#5A8EE8',0.16)}">
+      <span class="related-timeline-kicker">${count} evento${count===1?'':'s'}</span>
+      <strong>${escHtml(item.nombre||'Sin titulo')}</strong>
+    </button>`;
+  }).join('');
+  grid.querySelectorAll('.related-timeline-card').forEach(card=>{
+    card.addEventListener('click',()=>openTimeline(card.dataset.id));
+  });
+}
 function renderTimelineNotesPanel(tl){
   const panel=document.getElementById('timeline-notes-panel');
   if(!panel) return;
@@ -936,6 +1000,7 @@ function renderTimelineFromCache(tl){
   const eventos=ordenarEventos(tl.eventos||[]);
   const lecturas=normalizeTimelineNotes(tl.lecturas||[]);
   renderTimelineNotesPanel(tl);
+  renderRelatedTimelinesPanel(tl);
 
   if(eventos.length===0){
     empty.style.display='flex';
@@ -978,13 +1043,20 @@ function renderTimelineFromCache(tl){
 }
 
 // ─── EDITAR LÍNEA DE TIEMPO ───────────────────────────────
-function openModalEditarTimeline(){
+async function openModalEditarTimeline(){
   const tl=_timelineCache[activeTimelineId];
-  if(!tl||!canEdit(tl)){ toast('No tienes permiso para editar esta línea de tiempo.'); return; }
+  if(!tl||!canEdit(tl)){ toast('No tienes permiso para editar esta linea de tiempo.'); return; }
   document.getElementById('edit-tl-nombre').value=tl.nombre||'';
   document.getElementById('edit-tl-desc').value=tl.desc||'';
   selectEditColor(tl.color||'#E8845A');
   resetTimelineNotesEditor(tl.lecturas||[],ordenarEventos(tl.eventos||[]));
+  try {
+    const timelines=await fetchTimelines();
+    resetRelatedTimelinesEditor(tl.id,tl.relatedTimelineIds||[],timelines);
+  } catch(e){
+    console.error(e);
+    resetRelatedTimelinesEditor(tl.id,tl.relatedTimelineIds||[],[]);
+  }
   showModal('modal-editar-tl');
   document.getElementById('edit-tl-nombre').focus();
 }
@@ -995,8 +1067,9 @@ async function guardarEdicionTimeline(){
   const desc=document.getElementById('edit-tl-desc').value.trim();
   const color=selectedEditColor;
   const lecturas=getTimelineNotesFromEditor();
+  const relatedTimelineIds=normalizeRelatedTimelineIds(getRelatedTimelineIdsFromEditor());
   const tl=_timelineCache[activeTimelineId];
-  _timelineCache[activeTimelineId]={...tl,nombre,desc,color,lecturas};
+  _timelineCache[activeTimelineId]={...tl,nombre,desc,color,lecturas,relatedTimelineIds};
   document.getElementById('editor-title').textContent=nombre;
   document.getElementById('editor-desc').textContent=desc;
   document.documentElement.style.setProperty('--accent',color);
@@ -1005,7 +1078,7 @@ async function guardarEdicionTimeline(){
   hideModal('modal-editar-tl');
   toast('Línea de tiempo actualizada ✓');
   try {
-    await updateTimeline(activeTimelineId,{nombre,desc,color,lecturas});
+    await updateTimeline(activeTimelineId,{nombre,desc,color,lecturas,relatedTimelineIds});
   } catch(e){
     _timelineCache[activeTimelineId]=tl;
     document.getElementById('editor-title').textContent=tl.nombre;
