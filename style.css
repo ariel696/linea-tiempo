@@ -257,6 +257,16 @@ body::before {
   color: var(--text-muted);
 }
 
+.hero-sub-note {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  opacity: 0.7;
+  max-width: 480px;
+  line-height: 1.6;
+  margin-top: -22px;
+  margin-bottom: 36px;
+}
+
 .timelines-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
@@ -289,6 +299,19 @@ body::before {
   background: var(--card-accent, var(--accent));
   opacity: 0.12;
   pointer-events: none;
+}
+/* Imagen de fondo opcional de la línea de tiempo. Va dentro del propio
+   .timeline-card, así que el mask-image hexagonal de la card la recorta
+   automáticamente con la misma forma. La opacidad baja es lo que la
+   hace "transparente": se ve como una marca de agua detrás del texto. */
+.card-bg-image {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0.38;
+  pointer-events: none;
+  z-index: 0;
 }
 .timeline-card::after {
   content: '';
@@ -326,6 +349,29 @@ body::before {
   color: var(--card-accent, var(--accent));
   font-style: normal;
   font-weight: 500;
+}
+.card-owner-link {
+  cursor: pointer;
+}
+.card-owner-link:hover {
+  text-decoration: underline;
+}
+
+/* Insignia de "privada" en las tarjetas (solo el dueño / root la ven) */
+.card-privada-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  background: rgba(0,0,0,0.35);
+  border: 1px solid var(--border);
+  border-radius: 50px;
+  padding: 3px 10px;
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1;
 }
 
 .empty-state {
@@ -537,6 +583,27 @@ body::before {
   margin-bottom: 7px;
 }
 .opcional { font-weight: 400; opacity: 0.5; text-transform: none; letter-spacing: 0; }
+
+/* Fila de checkbox tipo "toggle" (ej: marcar línea de tiempo como privada) */
+.toggle-row {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 10px;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  font-size: 0.88rem !important;
+  color: var(--text) !important;
+  font-weight: 400 !important;
+  cursor: pointer;
+}
+.toggle-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .form-group input,
 .form-group textarea {
   width: 100%;
@@ -1125,6 +1192,17 @@ body::before {
   font-style: italic;
   margin-top: 2px;
   display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+}
+.editor-owner--link {
+  cursor: pointer;
+}
+.editor-owner--link:hover {
+  color: var(--accent);
+  text-decoration: underline;
 }
 
 .editor-header-actions {
@@ -1595,6 +1673,115 @@ body::before {
   gap: 10px;
 }
 
+/* ─── BUSCADOR Y ORDENAMIENTO DE LÍNEAS DE TIEMPO ─── */
+.timelines-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.search-box {
+  position: relative;
+  flex: 1 1 240px;
+  max-width: 320px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 1rem;
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 10px 16px 10px 36px;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+  color: var(--text);
+  outline: none;
+  transition: var(--transition);
+}
+.search-input::placeholder { color: var(--text-muted); }
+.search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+
+.sort-dropdown {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.btn-sort-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.btn-sort-toggle:hover { border-color: var(--accent); }
+
+.sort-toggle-arrow {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  transition: var(--transition);
+}
+.sort-dropdown.open .sort-toggle-arrow { transform: rotate(180deg); }
+
+.sort-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 180px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 20;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  animation: fadeUp 0.15s ease both;
+}
+.sort-dropdown-menu.hidden { display: none; }
+
+.sort-option {
+  background: transparent;
+  border: none;
+  text-align: left;
+  color: var(--text-muted);
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.sort-option:hover { background: var(--surface); color: var(--text); }
+.sort-option.active { background: var(--accent); color: #fff; }
+
+@media (max-width: 640px) {
+  .timelines-toolbar { flex-direction: column; align-items: stretch; }
+  .search-box { max-width: none; }
+  .sort-dropdown { align-self: flex-start; }
+}
+
 .bulk-count {
   font-size: 13px;
   color: var(--text-dim, #999);
@@ -1680,4 +1867,151 @@ body::before {
   color: #fff;
   box-shadow: 0 8px 24px var(--accent-glow);
   transform: translateY(-2px);
+}
+
+/* ===== PANTALLA PERFIL ===== */
+.perfil-main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 32px 80px;
+}
+
+.perfil-hero {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-bottom: 48px;
+  animation: fadeUp 0.5s ease both;
+}
+
+.perfil-avatar {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface2);
+  border: 2px solid var(--border);
+  flex-shrink: 0;
+}
+
+.perfil-nombre {
+  font-family: var(--font-display);
+  font-size: 1.9rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.perfil-count {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+}
+
+@media (max-width: 640px) {
+  .perfil-main { padding: 32px 20px 60px; }
+  .perfil-hero { gap: 16px; }
+  .perfil-avatar { width: 64px; height: 64px; }
+  .perfil-nombre { font-size: 1.4rem; }
+}
+
+/* ===== BADGE DE CONTADOR (botón "Solicitudes") ===== */
+.badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 5px;
+  margin-left: 6px;
+  border-radius: 50px;
+  background: var(--accent);
+  color: #1a1a1a;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+/* ===== TARJETA + CONTROLES DE "DESTACAR" (perfil) ===== */
+.timeline-card-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: fadeUp 0.4s ease both;
+}
+.timeline-card-wrap .timeline-card { animation: none; }
+
+/* ===== FRANJA "ACTIVIDAD RECIENTE" (solo visible para el dueño) ===== */
+.activity-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin: 0 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  width: fit-content;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.activity-strip-icon {
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 4px;
+}
+
+.feature-status {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+.feature-status--on { color: var(--accent); font-weight: 500; }
+.feature-status--muted { opacity: 0.6; }
+
+.btn-feature {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 50px;
+  padding: 5px 12px;
+  font-size: 0.76rem;
+  font-family: var(--font-body);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.btn-feature:hover { border-color: var(--accent); color: var(--accent); }
+.btn-feature-accept:hover { border-color: #5AE8A0; color: #5AE8A0; }
+.btn-feature-reject:hover, .btn-feature-cancelar:hover, .btn-feature-quitar:hover { border-color: #e74c3c; color: #e74c3c; }
+
+/* ===== PANTALLA SOLICITUDES ===== */
+.solicitudes-main {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 48px 32px 80px;
+}
+.solicitudes-list { display: flex; flex-direction: column; gap: 14px; }
+.solicitud-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 18px 20px;
+  animation: fadeUp 0.4s ease both;
+}
+.solicitud-info { min-width: 0; }
+.solicitud-nombre { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; margin-bottom: 4px; }
+.solicitud-meta { font-size: 0.8rem; color: var(--text-muted); }
+.solicitud-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
+@media (max-width: 640px) {
+  .solicitud-item { flex-direction: column; align-items: stretch; }
+  .solicitud-actions { justify-content: flex-end; }
 }

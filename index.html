@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Línea de Tiempo</title>
   <link rel="stylesheet" href="style.css"/>
+  <link rel="icon" type="image/png" href="linea-tiempo.png" sizes="any">
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
 </head>
 <body>
@@ -17,6 +18,8 @@
         <div id="user-area" class="user-area hidden">
           <img id="user-avatar" class="user-avatar" src="" alt=""/>
           <span id="user-name" class="user-name"></span>
+          <button class="btn-ghost" id="btn-mi-perfil">Mi perfil</button>
+          <button class="btn-ghost hidden" id="btn-solicitudes">Solicitudes<span class="badge-count hidden" id="solicitudes-badge"></span></button>
           <button class="btn-ghost" id="btn-logout">Salir</button>
         </div>
         <button class="btn-cta" id="btn-acceder">Crear mi propia línea de tiempo</button>
@@ -26,13 +29,14 @@
       <div class="home-hero">
         <h1>NUESTRA LINEA DE TIEMPO</h1>
         <p class="hero-sub">NUESTRA HISTORIA EN LINEAS DE TIEMPO<br/>TODAS EN UN SOLO LUGAR.</p>
+        <p class="hero-sub-note">Estas son las líneas de tiempo que el administrador ha destacado. Cada usuario tiene su propio perfil con todas las que ha creado, y puede sugerir que alguna aparezca aquí.</p>
         <button class="btn-primary hidden" id="btn-nueva">
           <span class="btn-icon">+</span> Nueva línea de tiempo
         </button>
       </div>
 <section class="timelines-section">
         <div class="timelines-section-header">
-          <h2 class="section-title">Líneas de tiempo</h2>
+          <h2 class="section-title">Líneas de tiempo destacadas</h2>
           <div class="bulk-actions">
             <!--
               Estos botones empiezan ocultos (clase "hidden"). El
@@ -46,17 +50,35 @@
             <button class="btn-mini hidden" id="btn-cancelar-seleccion">Cancelar</button>
           </div>
         </div>
+        <div class="timelines-toolbar">
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input type="text" id="home-search" class="search-input" placeholder="Buscar por nombre..." autocomplete="off"/>
+          </div>
+          <div class="sort-dropdown" id="home-sort-dropdown">
+            <button type="button" class="btn-sort-toggle" id="home-sort-toggle">
+              <span class="sort-toggle-label">Más reciente</span>
+              <span class="sort-toggle-arrow">▾</span>
+            </button>
+            <div class="sort-dropdown-menu hidden" id="home-sort-menu">
+              <button type="button" class="sort-option active" data-sort="recent">Más reciente</button>
+              <button type="button" class="sort-option" data-sort="oldest">Más antiguo</button>
+              <button type="button" class="sort-option" data-sort="events">Más eventos</button>
+              <button type="button" class="sort-option" data-sort="az">A-Z</button>
+            </div>
+          </div>
+        </div>
         <div id="timelines-grid" class="timelines-grid">
           <div class="empty-state" id="empty-state">
             <div class="empty-icon">◎</div>
-            <p>Aún no hay líneas de tiempo.<br/>¡Sé el primero en crear una!</p>
+            <p>Aún no hay líneas de tiempo destacadas.<br/>Crea la tuya y sugiérela desde tu perfil.</p>
           </div>
         </div>
       </section>
     </main>
     <footer id="nota-deploy-root" class="nota-deploy-root hidden">
       Este proyecto tiene su propio Firebase (<code>linea-tiempo-d4a50</code>), independiente de otros proyectos.
-      Para publicar cambios: <code>firebase deploy --only hosting</code> (sin build, es HTML/CSS/JS puro).
+      Para publicar cambios: <code>firebase deploy --only hosting,firestore</code> (sin build, es HTML/CSS/JS puro).
       <br/>
       Las imágenes de los eventos se guardan con Cloudinary (cuenta compartida con Kokoro), no en Firestore.
     </footer>
@@ -140,6 +162,76 @@
     </div>
   </div>
 
+  <!-- ====== PANTALLA PERFIL ====== -->
+  <div id="screen-perfil" class="screen hidden">
+    <header class="editor-header">
+      <button class="btn-back" id="btn-perfil-back">← Inicio</button>
+      <div class="editor-title-wrap">
+        <h1 class="editor-title">Perfil</h1>
+      </div>
+    </header>
+    <main class="perfil-main">
+      <div class="perfil-hero">
+        <img id="perfil-avatar" class="perfil-avatar" src="" alt=""/>
+        <div class="perfil-hero-info">
+          <h2 id="perfil-nombre" class="perfil-nombre"></h2>
+          <p id="perfil-count" class="perfil-count"></p>
+        </div>
+      </div>
+      <section class="timelines-section">
+        <div class="timelines-section-header">
+          <h2 class="section-title" id="perfil-grid-title">Líneas de tiempo</h2>
+          <button class="btn-primary sm hidden" id="btn-nueva-perfil">
+            <span class="btn-icon">+</span> Nueva línea de tiempo
+          </button>
+        </div>
+        <div class="timelines-toolbar">
+          <div class="search-box">
+            <span class="search-icon">⌕</span>
+            <input type="text" id="perfil-search" class="search-input" placeholder="Buscar por nombre..." autocomplete="off"/>
+          </div>
+          <div class="sort-dropdown" id="perfil-sort-dropdown">
+            <button type="button" class="btn-sort-toggle" id="perfil-sort-toggle">
+              <span class="sort-toggle-label">Más reciente</span>
+              <span class="sort-toggle-arrow">▾</span>
+            </button>
+            <div class="sort-dropdown-menu hidden" id="perfil-sort-menu">
+              <button type="button" class="sort-option active" data-sort="recent">Más reciente</button>
+              <button type="button" class="sort-option" data-sort="oldest">Más antiguo</button>
+              <button type="button" class="sort-option" data-sort="events">Más eventos</button>
+              <button type="button" class="sort-option" data-sort="az">A-Z</button>
+            </div>
+          </div>
+        </div>
+        <div id="perfil-grid" class="timelines-grid">
+          <div class="empty-state" id="perfil-empty">
+            <div class="empty-icon">◎</div>
+            <p>Aún no hay líneas de tiempo aquí.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ====== PANTALLA SOLICITUDES (solo usuario root) ====== -->
+  <div id="screen-solicitudes" class="screen hidden">
+    <header class="editor-header">
+      <button class="btn-back" id="btn-solicitudes-back">← Inicio</button>
+      <div class="editor-title-wrap">
+        <h1 class="editor-title">Solicitudes para el inicio</h1>
+        <span class="editor-desc">Líneas de tiempo que sus dueños quieren destacar</span>
+      </div>
+    </header>
+    <main class="solicitudes-main">
+      <div id="solicitudes-list" class="solicitudes-list">
+        <div class="empty-state" id="solicitudes-empty">
+          <div class="empty-icon">◎</div>
+          <p>No hay solicitudes pendientes.</p>
+        </div>
+      </div>
+    </main>
+  </div>
+
   <!-- ====== MODAL: NUEVA LÍNEA DE TIEMPO ====== -->
   <div id="modal-nueva" class="modal-overlay hidden">
     <div class="modal">
@@ -163,6 +255,17 @@
           <button class="color-dot" data-color="#E8D45A" style="background:#E8D45A"></button>
           <button class="color-dot" data-color="#AE5AE8" style="background:#AE5AE8"></button>
         </div>
+      </div>
+      <div class="form-group">
+        <label>Imagen de fondo <span class="opcional">(opcional)</span></label>
+        <input type="file" id="input-tl-imagen" accept="image/*" hidden/>
+        <div class="img-gallery-editor" id="tl-imagen-editor"></div>
+      </div>
+      <div class="form-group">
+        <label class="toggle-row">
+          <input type="checkbox" id="input-privada"/>
+          <span>Hacer esta línea de tiempo privada <span class="opcional">(solo tú podrás verla; no aparecerá en el inicio ni en tu perfil para otras personas)</span></span>
+        </label>
       </div>
       <button class="btn-primary full" id="btn-crear-confirmar">Crear</button>
     </div>
@@ -193,6 +296,11 @@
         </div>
       </div>
       <div class="form-group">
+        <label>Imagen de fondo <span class="opcional">(opcional)</span></label>
+        <input type="file" id="edit-tl-imagen" accept="image/*" hidden/>
+        <div class="img-gallery-editor" id="edit-tl-imagen-editor"></div>
+      </div>
+      <div class="form-group">
         <div class="timeline-notes-edit-header">
           <label>Descripciones de lectura <span class="opcional">(opcional)</span></label>
           <button type="button" class="btn-mini" id="btn-add-timeline-note">+ Descripción</button>
@@ -202,6 +310,12 @@
       <div class="form-group">
         <label>Lineas relacionadas <span class="opcional">(opcional)</span></label>
         <div class="related-timelines-editor" id="related-timelines-editor"></div>
+      </div>
+      <div class="form-group">
+        <label class="toggle-row">
+          <input type="checkbox" id="edit-tl-privada"/>
+          <span>Línea de tiempo privada <span class="opcional">(solo tú podrás verla; no aparecerá en el inicio ni en tu perfil para otras personas)</span></span>
+        </label>
       </div>
       <button class="btn-primary full" id="btn-editar-tl-confirmar">Guardar cambios</button>
     </div>

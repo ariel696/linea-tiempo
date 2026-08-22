@@ -96,6 +96,25 @@ let eventDraftSnapshot = null;
 let confirmationResult = null;
 let isSavingEvent      = false;
 let isCreatingTimeline = false;
+let viewingProfileUid  = null;
+let lastListScreen     = 'home';
+
+// Estado de búsqueda/orden de las grillas de líneas de tiempo (inicio y perfil).
+// Se mantienen por separado porque son pantallas distintas con sus propios controles.
+let homeSortBy       = 'recent';
+let homeSearchQuery  = '';
+let _homeTimelinesRaw  = [];
+
+let perfilSortBy      = 'recent';
+let perfilSearchQuery = '';
+let _perfilTimelinesRaw = [];
+
+// Imagen de fondo de la línea de tiempo (modal Nueva y modal Editar).
+// Solo una imagen por línea, a diferencia de la galería de eventos.
+let pendingTlImagenUrl      = null;
+let pendingTlImagenSubiendo = false;
+let editTlImagenUrl         = null;
+let editTlImagenSubiendo    = false;
 
 let _timelinesCache = null;
 let _timelineCache  = {};
@@ -175,6 +194,17 @@ function canEdit(tl){
   if(isRoot) return true;
   if(tl.ownerId && tl.ownerId === currentUser.uid) return true;
   return false;
+}
+
+// Una línea de tiempo "privada" solo la puede VER su dueño (o root).
+// El resto de la gente ni siquiera sabe que existe: no aparece en el
+// inicio, no aparece en el perfil de otra persona, y si alguien
+// intenta abrirla directamente, se le niega el acceso.
+function canView(tl){
+  if(!tl.privada) return true;
+  if(!currentUser) return false;
+  if(isRoot) return true;
+  return tl.ownerId === currentUser.uid;
 }
 
 // ─── HEADER ───────────────────────────────────────────────
@@ -297,14 +327,16 @@ function createTimeline(data){
     eventos:[],
     creadoEn:serverTimestamp(),
     ownerId:currentUser.uid,
-    ownerName:currentUser.displayName||currentUser.email||'Usuario'
+    ownerName:currentUser.displayName||currentUser.email||'Usuario',
+    ownerPhotoURL:currentUser.photoURL||null
   });
   const createdTimeline = {
     id: ref.id,
     ...data,
     eventos: [],
     ownerId: currentUser.uid,
-    ownerName: currentUser.displayName || currentUser.email || 'Usuario'
+    ownerName: currentUser.displayName || currentUser.email || 'Usuario',
+    ownerPhotoURL: currentUser.photoURL || null
   };
   _timelineCache[ref.id] = createdTimeline;
   _timelinesCache = [createdTimeline, ...((_timelinesCache||[]).filter(t=>t.id!==ref.id))];
@@ -819,29 +851,200 @@ async function renderHomePrincipalTimeline(timelines){
   } catch(e){ console.error('Error cargando línea principal del inicio:',e); }
 }
 
+// ─── BÚSQUEDA Y ORDEN DE LÍNEAS DE TIEMPO ───────────────────
+// Convierte el campo "creadoEn" (que puede venir como Timestamp de
+// Firestore, como {seconds}, o como número plano) a milisegundos,
+// para poder comparar fechas sin importar de dónde vino el dato.
+function getCreadoEnMillis(tl){
+  const c = tl && tl.creadoEn;
+  if(!c) return 0;
+  if(typeof c.toMillis === 'function') return c.toMillis();
+  if(typeof c.seconds === 'number') return c.seconds*1000;
+  if(typeof c === 'number') return c;
+  return 0;
+}
+
+// Milisegundos de la última actividad real sobre la línea de tiempo:
+// usa "actualizadoEn" (se guarda cada vez que se edita el nombre/desc,
+// o se agrega/edita/elimina un evento) y si nunca se ha editado, cae
+// de vuelta a la fecha de creación.
+function getUltimaActividadMillis(tl){
+  const a=tl && tl.actualizadoEn;
+  if(typeof a === 'number' && a>0) return a;
+  return getCreadoEnMillis(tl);
+}
+
+// Convierte una diferencia de tiempo en un texto corto en español,
+// tipo "hace 3 días". Usado en la franja de "Actividad reciente".
+function formatTiempoRelativo(millis){
+  if(!millis) return '';
+  const diffMs=Date.now()-millis;
+  if(diffMs<60000) return 'justo ahora';
+  const minuto=60000, hora=3600000, dia=86400000, semana=7*dia, mes=30*dia, anio=365*dia;
+  if(diffMs<hora){ const n=Math.floor(diffMs/minuto); return `hace ${n} minuto${n===1?'':'s'}`; }
+  if(diffMs<dia){ const n=Math.floor(diffMs/hora); return `hace ${n} hora${n===1?'':'s'}`; }
+  if(diffMs<semana){ const n=Math.floor(diffMs/dia); return `hace ${n} día${n===1?'':'s'}`; }
+  if(diffMs<mes){ const n=Math.floor(diffMs/semana); return `hace ${n} semana${n===1?'':'s'}`; }
+  if(diffMs<anio){ const n=Math.floor(diffMs/mes); return `hace ${n} mes${n===1?'':'es'}`; }
+  const n=Math.floor(diffMs/anio); return `hace ${n} año${n===1?'':'s'}`;
+}
+
+// Construye la franja "Actividad reciente" que va arriba del bloque de
+// "Destacar en el inicio", en el muro/perfil. Solo el dueño de la línea
+// de tiempo la ve (a diferencia de "Destacar", que root también puede
+// ver): ayuda a distinguir de un vistazo cuáles líneas siguen activas
+// y cuáles llevan tiempo abandonadas.
+function buildActividadRow(tl){
+  if(!currentUser || tl.ownerId!==currentUser.uid) return null;
+  const millis=getUltimaActividadMillis(tl);
+  const row=document.createElement('div');
+  row.className='activity-strip';
+  row.innerHTML=`<span class="activity-strip-icon">🕒</span><span>Actualizada ${formatTiempoRelativo(millis)}</span>`;
+  return row;
+}
+
+// Filtra por nombre (si hay texto buscado) y ordena según el modo
+// elegido. Devuelve un arreglo nuevo, sin modificar el original.
+function filtrarYOrdenarTimelines(lista, query, sortBy){
+  const q=(query||'').trim().toLowerCase();
+  let out = q ? lista.filter(tl=>(tl.nombre||'').toLowerCase().includes(q)) : [...lista];
+  switch(sortBy){
+    case 'oldest':
+      out.sort((a,b)=>getCreadoEnMillis(a)-getCreadoEnMillis(b));
+      break;
+    case 'events':
+      out.sort((a,b)=>(b.eventos||[]).length-(a.eventos||[]).length);
+      break;
+    case 'az':
+      out.sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'}));
+      break;
+    case 'recent':
+    default:
+      out.sort((a,b)=>getCreadoEnMillis(b)-getCreadoEnMillis(a));
+  }
+  return out;
+}
+
+const SORT_LABELS = { recent:'Más reciente', oldest:'Más antiguo', events:'Más eventos', az:'A-Z' };
+
+// Conecta el buscador y el botón desplegable de orden (home o perfil):
+// engancha los listeners solo una vez (evita duplicar handlers) y
+// sincroniza el texto/opción activa con el estado guardado en JS.
+function setupTimelinesToolbar({ searchInputId, sortToggleId, sortMenuId, getSortBy, setSortBy, getQuery, setQuery, onChange }){
+  const searchInput=document.getElementById(searchInputId);
+  const dropdown=document.getElementById(sortToggleId)?.closest('.sort-dropdown');
+  const toggle=document.getElementById(sortToggleId);
+  const menu=document.getElementById(sortMenuId);
+  if(!searchInput || !toggle || !menu || !dropdown) return;
+
+  if(!searchInput._wired){
+    searchInput._wired=true;
+    searchInput.addEventListener('input',()=>{
+      setQuery(searchInput.value);
+      onChange();
+    });
+  }
+
+  function syncSortUI(){
+    toggle.querySelector('.sort-toggle-label').textContent = SORT_LABELS[getSortBy()] || SORT_LABELS.recent;
+    menu.querySelectorAll('.sort-option').forEach(b=>b.classList.toggle('active', b.dataset.sort===getSortBy()));
+  }
+
+  if(!toggle._wired){
+    toggle._wired=true;
+    toggle.addEventListener('click',e=>{
+      e.stopPropagation();
+      const abierto=!menu.classList.contains('hidden');
+      // Cierra cualquier otro desplegable de orden que haya quedado abierto
+      // (por ejemplo si hubiera varios en la misma pantalla).
+      document.querySelectorAll('.sort-dropdown-menu').forEach(m=>m.classList.add('hidden'));
+      document.querySelectorAll('.sort-dropdown').forEach(d=>d.classList.remove('open'));
+      if(!abierto){
+        menu.classList.remove('hidden');
+        dropdown.classList.add('open');
+      }
+    });
+  }
+  if(!menu._wired){
+    menu._wired=true;
+    menu.addEventListener('click',e=>{
+      e.stopPropagation();
+      const btn=e.target.closest('.sort-option');
+      if(!btn) return;
+      setSortBy(btn.dataset.sort);
+      menu.classList.add('hidden');
+      dropdown.classList.remove('open');
+      syncSortUI();
+      onChange();
+    });
+  }
+  // Cierra cualquier desplegable abierto si se hace clic fuera de él.
+  // Se engancha una sola vez en todo el documento.
+  if(!window._sortDropdownOutsideWired){
+    window._sortDropdownOutsideWired=true;
+    document.addEventListener('click',()=>{
+      document.querySelectorAll('.sort-dropdown-menu').forEach(m=>m.classList.add('hidden'));
+      document.querySelectorAll('.sort-dropdown').forEach(d=>d.classList.remove('open'));
+    });
+  }
+
+  searchInput.value=getQuery();
+  syncSortUI();
+}
+
 async function renderHome(){
+  lastListScreen='home';
   const seq=++_renderHomeSeq;
   showScreen('home');
   updateHeader(currentUser);
-  const grid=document.getElementById('timelines-grid');
-  const empty=document.getElementById('empty-state');
-  grid.innerHTML='';
-  grid.appendChild(empty);
 
   let timelines=[];
   try { timelines=await fetchTimelines(); } catch(e){ console.error(e); }
   if(seq!==_renderHomeSeq) return;
 
-  const otras=timelines;
+  // El inicio es una vitrina curada: solo muestra líneas de tiempo que
+  // el usuario root aprobó explícitamente como "destacadas". Todas las
+  // demás (nuevas, pendientes, rechazadas o privadas) viven únicamente
+  // en el perfil de quien las creó, hasta que las sugiera y se acepten.
+  _homeTimelinesRaw=timelines.filter(tl=>!tl.privada && tl.estadoDestacada==='aprobada');
 
   // ¿Hay al menos una línea de tiempo que el usuario actual puede borrar?
   // Si no hay ninguna, no tiene sentido mostrarle el botón "Seleccionar".
-  const hayBorrables = otras.some(tl=>canEdit(tl));
+  const hayBorrables = _homeTimelinesRaw.some(tl=>canEdit(tl));
   const btnActivar = document.getElementById('btn-activar-seleccion');
   btnActivar.classList.toggle('hidden', !hayBorrables);
 
-  if(otras.length===0){
+  setupTimelinesToolbar({
+    searchInputId:'home-search',
+    sortToggleId:'home-sort-toggle',
+    sortMenuId:'home-sort-menu',
+    getSortBy:()=>homeSortBy,
+    setSortBy:v=>{homeSortBy=v;},
+    getQuery:()=>homeSearchQuery,
+    setQuery:v=>{homeSearchQuery=v;},
+    onChange:renderHomeCards
+  });
+
+  renderHomeCards();
+}
+
+// Dibuja las tarjetas del inicio a partir de _homeTimelinesRaw, aplicando
+// la búsqueda y el orden vigentes. Se llama tanto al cargar la pantalla
+// como cada vez que cambia el texto buscado o el botón de orden.
+function renderHomeCards(){
+  const grid=document.getElementById('timelines-grid');
+  const empty=document.getElementById('empty-state');
+  grid.innerHTML='';
+  grid.appendChild(empty);
+
+  const otras=filtrarYOrdenarTimelines(_homeTimelinesRaw, homeSearchQuery, homeSortBy);
+
+  if(_homeTimelinesRaw.length===0){
     empty.style.display='block';
+    empty.querySelector('p').innerHTML='Aún no hay líneas de tiempo destacadas.<br/>Crea la tuya y sugiérela desde tu perfil.';
+  } else if(otras.length===0){
+    empty.style.display='block';
+    empty.querySelector('p').innerHTML='No encontramos líneas de tiempo con ese nombre.';
   } else {
     empty.style.display='none';
     otras.forEach((tl,i)=>{
@@ -851,8 +1054,8 @@ async function renderHome(){
       card.style.animationDelay=(i*0.07)+'s';
       const count=(tl.eventos||[]).length;
       const esPropia=currentUser&&tl.ownerId===currentUser.uid;
-      const ownerLabel=tl.ownerName?`<span class="card-owner">por ${escHtml(tl.ownerName)}</span>`:'';
-      const propiaLabel=esPropia?`<span class="card-owner card-owner--propia">✎ Tuya</span>`:ownerLabel;
+      const ownerLabel=tl.ownerName?`<span class="card-owner card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">por ${escHtml(tl.ownerName)}</span>`:'';
+      const propiaLabel=esPropia?`<span class="card-owner card-owner--propia card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">✎ Tuya</span>`:ownerLabel;
       const puedeBorrar=canEdit(tl);
       // El checkbox solo se dibuja si estamos en modo selección Y el
       // usuario tiene permiso de borrar esta línea de tiempo en particular.
@@ -861,7 +1064,9 @@ async function renderHome(){
              <input type="checkbox" class="card-checkbox-input" data-id="${tl.id}" ${idsSeleccionados.has(tl.id)?'checked':''}/>
            </label>`
         : '';
+      const bgImageHtml=tl.imagenUrl?`<div class="card-bg-image" style="background-image:url('${escHtml(tl.imagenUrl)}')"></div>`:'';
       card.innerHTML=`
+        ${bgImageHtml}
         ${checkboxHtml}
         <span class="card-icon">◉</span>
         <div class="card-name">${escHtml(tl.nombre)}</div>
@@ -883,9 +1088,301 @@ async function renderHome(){
       } else {
         card.addEventListener('click',()=>openTimeline(tl.id));
       }
+      const ownerLink=card.querySelector('.card-owner-link');
+      if(ownerLink && tl.ownerId){
+        ownerLink.addEventListener('click',e=>{
+          e.stopPropagation();
+          renderPerfil(tl.ownerId);
+        });
+      }
       grid.appendChild(card);
     });
   }
+}
+
+// ─── PERFIL / MURO DE USUARIO ──────────────────────────────
+// Muestra las líneas de tiempo creadas por un usuario en particular.
+// Es pública: cualquiera puede visitarla, pero las líneas marcadas
+// como "privada" solo se muestran si quien mira es el propio dueño
+// (o root). Se accede desde "Mi perfil" en el header, o haciendo
+// clic en el nombre del dueño dentro de cualquier tarjeta.
+async function renderPerfil(uid){
+  if(!uid) return;
+  // Si cambiamos de perfil (otro usuario), reseteamos la búsqueda/orden
+  // para no arrastrar un filtro que no tiene sentido en el nuevo muro.
+  if(viewingProfileUid!==uid){
+    perfilSearchQuery='';
+    perfilSortBy='recent';
+  }
+  viewingProfileUid=uid;
+  lastListScreen='perfil';
+  const seq=++_renderHomeSeq;
+  showScreen('perfil');
+  updateHeader(currentUser);
+
+  let timelines=[];
+  try { timelines=await fetchTimelines(); } catch(e){ console.error(e); }
+  if(seq!==_renderHomeSeq) return;
+
+  const esPropio = !!(currentUser && currentUser.uid===uid);
+  const puedeVerPrivadas = esPropio || isRoot;
+
+  const todasDelUsuario = timelines.filter(tl=>tl.ownerId===uid);
+  const visibles = todasDelUsuario.filter(tl=>!tl.privada || puedeVerPrivadas);
+  const numPrivadas = todasDelUsuario.filter(tl=>tl.privada).length;
+  _perfilTimelinesRaw = visibles;
+
+  // Para el nombre/foto: si es tu propio perfil usamos tus datos de
+  // Auth (siempre disponibles). Si es el perfil de otra persona, no
+  // tenemos acceso a su cuenta de Auth, así que usamos lo que quedó
+  // guardado en cualquiera de sus líneas de tiempo (ownerName/ownerPhotoURL).
+  let nombre='Usuario', foto='';
+  if(esPropio && currentUser){
+    nombre=currentUser.displayName||currentUser.email||'Usuario';
+    foto=currentUser.photoURL||'';
+  } else if(todasDelUsuario.length){
+    nombre=todasDelUsuario[0].ownerName||'Usuario';
+    foto=todasDelUsuario[0].ownerPhotoURL||'';
+  }
+
+  document.getElementById('perfil-nombre').textContent=nombre;
+  const avatarEl=document.getElementById('perfil-avatar');
+  if(foto){ avatarEl.src=foto; avatarEl.style.display='block'; }
+  else { avatarEl.style.display='none'; }
+
+  const countLabel = visibles.length===0?'Sin líneas de tiempo aún'
+    : `${visibles.length} línea${visibles.length===1?'':'s'} de tiempo`;
+  const privLabel = (esPropio && numPrivadas>0) ? ` (${numPrivadas} privada${numPrivadas===1?'':'s'})` : '';
+  document.getElementById('perfil-count').textContent = countLabel+privLabel;
+
+  document.getElementById('perfil-grid-title').textContent = esPropio
+    ? 'Tus líneas de tiempo'
+    : `Líneas de tiempo de ${nombre}`;
+  document.getElementById('btn-nueva-perfil').classList.toggle('hidden', !esPropio);
+
+  // Los textos de "vacío" cambian según si de plano no hay líneas de
+  // tiempo, o si hay pero la búsqueda actual no encontró ninguna.
+  const perfilEmptyBaseMsg = esPropio
+    ? 'Aún no has creado ninguna línea de tiempo.'
+    : 'Este usuario aún no tiene líneas de tiempo públicas.';
+
+  setupTimelinesToolbar({
+    searchInputId:'perfil-search',
+    sortToggleId:'perfil-sort-toggle',
+    sortMenuId:'perfil-sort-menu',
+    getSortBy:()=>perfilSortBy,
+    setSortBy:v=>{perfilSortBy=v;},
+    getQuery:()=>perfilSearchQuery,
+    setQuery:v=>{perfilSearchQuery=v;},
+    onChange:()=>renderPerfilCards(perfilEmptyBaseMsg)
+  });
+
+  renderPerfilCards(perfilEmptyBaseMsg);
+}
+
+// Dibuja las tarjetas del perfil a partir de _perfilTimelinesRaw,
+// aplicando la búsqueda y el orden vigentes.
+function renderPerfilCards(emptyBaseMsg){
+  const grid=document.getElementById('perfil-grid');
+  const empty=document.getElementById('perfil-empty');
+  grid.innerHTML='';
+  grid.appendChild(empty);
+
+  const visibles=filtrarYOrdenarTimelines(_perfilTimelinesRaw, perfilSearchQuery, perfilSortBy);
+
+  if(_perfilTimelinesRaw.length===0){
+    empty.style.display='block';
+    empty.querySelector('p').textContent=emptyBaseMsg;
+  } else if(visibles.length===0){
+    empty.style.display='block';
+    empty.querySelector('p').textContent='No encontramos líneas de tiempo con ese nombre.';
+  } else {
+    empty.style.display='none';
+    visibles.forEach((tl,i)=>{
+      const wrap=document.createElement('div');
+      wrap.className='timeline-card-wrap';
+
+      const card=document.createElement('div');
+      card.className='timeline-card';
+      card.style.setProperty('--card-accent',tl.color||'#E8845A');
+      card.style.animationDelay=(i*0.07)+'s';
+      const count=(tl.eventos||[]).length;
+      const bgImageHtml=tl.imagenUrl?`<div class="card-bg-image" style="background-image:url('${escHtml(tl.imagenUrl)}')"></div>`:'';
+      const privadaBadge=tl.privada?`<span class="card-privada-badge">🔒 Privada</span>`:'';
+      card.innerHTML=`
+        ${bgImageHtml}
+        ${privadaBadge}
+        <span class="card-icon">◉</span>
+        <div class="card-name">${escHtml(tl.nombre)}</div>
+        <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
+        <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>`;
+      card.addEventListener('click',()=>openTimeline(tl.id));
+      wrap.appendChild(card);
+
+      const activityRow=buildActividadRow(tl);
+      if(activityRow) wrap.appendChild(activityRow);
+
+      const featureRow=buildFeatureRow(tl);
+      if(featureRow) wrap.appendChild(featureRow);
+
+      grid.appendChild(wrap);
+    });
+  }
+}
+
+// Construye la fila de controles para "destacar en el inicio" que va
+// debajo de cada tarjeta en el perfil. Solo se muestra si quien mira
+// es el dueño de la línea o el usuario root, y la línea no es privada
+// (una línea privada nunca puede aparecer en el inicio).
+function buildFeatureRow(tl){
+  if(!currentUser || tl.privada) return null;
+  const isOwner = tl.ownerId===currentUser.uid;
+  if(!isOwner && !isRoot) return null;
+
+  const estado = tl.estadoDestacada || 'ninguna';
+  const row=document.createElement('div');
+  row.className='feature-row';
+
+  if(isRoot){
+    // El usuario root puede aprobar/rechazar directamente desde
+    // cualquier perfil, sin pasar por la pantalla de Solicitudes.
+    if(estado==='pendiente'){
+      row.innerHTML=`<span class="feature-status">⏳ Pidió aparecer en el inicio</span>
+        <button type="button" class="btn-feature btn-feature-accept">✓ Aprobar</button>
+        <button type="button" class="btn-feature btn-feature-reject">✕ Rechazar</button>`;
+      row.querySelector('.btn-feature-accept').addEventListener('click',()=>aprobarDestacada(tl.id));
+      row.querySelector('.btn-feature-reject').addEventListener('click',()=>rechazarDestacada(tl.id));
+    } else if(estado==='aprobada'){
+      row.innerHTML=`<span class="feature-status feature-status--on">★ En el inicio</span>
+        <button type="button" class="btn-feature btn-feature-quitar">Quitar</button>`;
+      row.querySelector('.btn-feature-quitar').addEventListener('click',()=>quitarDestacada(tl.id));
+    } else {
+      row.innerHTML=`<button type="button" class="btn-feature btn-feature-destacar">★ Destacar en el inicio</button>`;
+      row.querySelector('.btn-feature-destacar').addEventListener('click',()=>aprobarDestacada(tl.id));
+    }
+  } else {
+    // Dueño (no root): puede sugerir, cancelar su solicitud, o
+    // quitar su propia línea del inicio si ya estaba destacada.
+    if(estado==='pendiente'){
+      row.innerHTML=`<span class="feature-status">⏳ Esperando revisión</span>
+        <button type="button" class="btn-feature btn-feature-cancelar">Cancelar</button>`;
+      row.querySelector('.btn-feature-cancelar').addEventListener('click',()=>cancelarSolicitudDestacada(tl.id));
+    } else if(estado==='aprobada'){
+      row.innerHTML=`<span class="feature-status feature-status--on">★ Mostrándose en el inicio</span>
+        <button type="button" class="btn-feature btn-feature-quitar">Quitar</button>`;
+      row.querySelector('.btn-feature-quitar').addEventListener('click',()=>quitarDestacada(tl.id));
+    } else {
+      const nota = estado==='rechazada'
+        ? `<span class="feature-status feature-status--muted">Tu última solicitud no fue aceptada</span>`
+        : '';
+      row.innerHTML=`${nota}<button type="button" class="btn-feature btn-feature-sugerir">☆ Sugerir para el inicio</button>`;
+      row.querySelector('.btn-feature-sugerir').addEventListener('click',()=>solicitarDestacada(tl.id));
+    }
+  }
+  return row;
+}
+
+async function solicitarDestacada(id){
+  try {
+    await updateTimeline(id,{estadoDestacada:'pendiente'});
+    toast('Solicitud enviada. El administrador la revisará pronto.');
+    if(viewingProfileUid) renderPerfil(viewingProfileUid);
+    if(isRoot) refreshSolicitudesBadge();
+  } catch(e){ console.error(e); toast('No se pudo enviar la solicitud.'); }
+}
+
+async function cancelarSolicitudDestacada(id){
+  try {
+    await updateTimeline(id,{estadoDestacada:'ninguna'});
+    toast('Solicitud cancelada.');
+    if(viewingProfileUid) renderPerfil(viewingProfileUid);
+    if(isRoot) refreshSolicitudesBadge();
+  } catch(e){ console.error(e); toast('Error al cancelar.'); }
+}
+
+async function quitarDestacada(id){
+  try {
+    await updateTimeline(id,{estadoDestacada:'ninguna'});
+    toast('Se quitó del inicio.');
+    if(viewingProfileUid) renderPerfil(viewingProfileUid);
+    if(isRoot) refreshSolicitudesBadge();
+  } catch(e){ console.error(e); toast('Error al quitar.'); }
+}
+
+async function aprobarDestacada(id){
+  try {
+    await updateTimeline(id,{estadoDestacada:'aprobada'});
+    toast('Línea destacada en el inicio ✓');
+    if(document.getElementById('screen-solicitudes').classList.contains('active')) await renderSolicitudes();
+    else if(viewingProfileUid) await renderPerfil(viewingProfileUid);
+    refreshSolicitudesBadge();
+  } catch(e){ console.error(e); toast('Error al aprobar.'); }
+}
+
+async function rechazarDestacada(id){
+  try {
+    await updateTimeline(id,{estadoDestacada:'rechazada'});
+    toast('Solicitud rechazada.');
+    if(document.getElementById('screen-solicitudes').classList.contains('active')) await renderSolicitudes();
+    else if(viewingProfileUid) await renderPerfil(viewingProfileUid);
+    refreshSolicitudesBadge();
+  } catch(e){ console.error(e); toast('Error.'); }
+}
+
+// ─── PANTALLA SOLICITUDES (solo root) ───────────────────────
+async function renderSolicitudes(){
+  if(!isRoot){ renderHome(); return; }
+  showScreen('solicitudes');
+  updateHeader(currentUser);
+
+  const list=document.getElementById('solicitudes-list');
+  const empty=document.getElementById('solicitudes-empty');
+  list.innerHTML='';
+  list.appendChild(empty);
+
+  let timelines=[];
+  try { timelines=await fetchTimelines(); } catch(e){ console.error(e); }
+  const pendientes=timelines.filter(tl=>tl.estadoDestacada==='pendiente');
+  updateSolicitudesBadge(pendientes.length);
+
+  if(pendientes.length===0){
+    empty.style.display='block';
+    return;
+  }
+  empty.style.display='none';
+  pendientes.forEach(tl=>{
+    const item=document.createElement('div');
+    item.className='solicitud-item';
+    item.innerHTML=`
+      <div class="solicitud-info">
+        <div class="solicitud-nombre">${escHtml(tl.nombre)}</div>
+        <div class="solicitud-meta">por ${escHtml(tl.ownerName||'Usuario')} · ${escHtml(tl.desc||'Sin descripción')}</div>
+      </div>
+      <div class="solicitud-actions">
+        <button type="button" class="btn-feature btn-feature-accept">✓ Aprobar</button>
+        <button type="button" class="btn-feature btn-feature-reject">✕ Rechazar</button>
+        <button type="button" class="btn-mini btn-solicitud-ver">Ver</button>
+      </div>`;
+    item.querySelector('.btn-feature-accept').addEventListener('click',()=>aprobarDestacada(tl.id));
+    item.querySelector('.btn-feature-reject').addEventListener('click',()=>rechazarDestacada(tl.id));
+    item.querySelector('.btn-solicitud-ver').addEventListener('click',()=>openTimeline(tl.id));
+    list.appendChild(item);
+  });
+}
+
+async function refreshSolicitudesBadge(){
+  if(!isRoot) return;
+  try {
+    const timelines=await fetchTimelines();
+    updateSolicitudesBadge(timelines.filter(tl=>tl.estadoDestacada==='pendiente').length);
+  } catch(e){ console.error(e); }
+}
+
+function updateSolicitudesBadge(n){
+  const badge=document.getElementById('solicitudes-badge');
+  if(!badge) return;
+  if(n>0){ badge.textContent=n; badge.classList.remove('hidden'); }
+  else { badge.classList.add('hidden'); }
 }
 
 // Activa o desactiva el modo selección, mostrando/ocultando los botones.
@@ -1024,11 +1521,25 @@ function friendlyError(code){
 }
 
 // ─── EDITOR ───────────────────────────────────────────────
+// Vuelve a la lista desde la que se entró al editor: el inicio o el
+// perfil que se estaba viendo (según cuál se haya visitado último).
+async function goBackToList(){
+  if(lastListScreen==='perfil' && viewingProfileUid) await renderPerfil(viewingProfileUid);
+  else await renderHome();
+}
+
 async function openTimeline(id){
-  activeTimelineId=id;
   const tl=await getTimeline(id);
   if(!tl) return;
 
+  // Las líneas privadas ni siquiera se abren si quien mira no es el
+  // dueño (ni root), aunque tenga el enlace directo.
+  if(!canView(tl)){
+    toast('Esta línea de tiempo es privada.');
+    return;
+  }
+
+  activeTimelineId=id;
   const puedeEditar=canEdit(tl);
 
   document.documentElement.style.setProperty('--accent',tl.color||'#E8845A');
@@ -1038,8 +1549,15 @@ async function openTimeline(id){
 
   const ownerEl=document.getElementById('editor-owner');
   if(ownerEl){
-    if(!puedeEditar&&tl.ownerName){ ownerEl.textContent=`por ${tl.ownerName}`; ownerEl.classList.remove('hidden'); }
-    else { ownerEl.classList.add('hidden'); }
+    if(!puedeEditar&&tl.ownerName){
+      ownerEl.textContent=`por ${tl.ownerName}`;
+      ownerEl.classList.remove('hidden');
+      if(tl.ownerId){
+        ownerEl.classList.add('editor-owner--link');
+        ownerEl.onclick=()=>renderPerfil(tl.ownerId);
+      }
+    }
+    else { ownerEl.classList.add('hidden'); ownerEl.classList.remove('editor-owner--link'); ownerEl.onclick=null; }
   }
 
   const btnAdd=document.getElementById('btn-add-event');
@@ -1122,7 +1640,11 @@ async function openModalEditarTimeline(){
   if(!tl||!canEdit(tl)){ toast('No tienes permiso para editar esta linea de tiempo.'); return; }
   document.getElementById('edit-tl-nombre').value=tl.nombre||'';
   document.getElementById('edit-tl-desc').value=tl.desc||'';
+  document.getElementById('edit-tl-privada').checked=!!tl.privada;
   selectEditColor(tl.color||'#E8845A');
+  editTlImagenUrl=tl.imagenUrl||null;
+  editTlImagenSubiendo=false;
+  renderEditTlImagen();
   resetTimelineNotesEditor(tl.lecturas||[],ordenarEventos(tl.eventos||[]));
   try {
     const timelines=await fetchTimelines();
@@ -1139,11 +1661,14 @@ async function guardarEdicionTimeline(){
   const nombre=document.getElementById('edit-tl-nombre').value.trim();
   if(!nombre){ shake(document.getElementById('edit-tl-nombre')); return; }
   const desc=document.getElementById('edit-tl-desc').value.trim();
+  const privada=document.getElementById('edit-tl-privada').checked;
   const color=selectedEditColor;
   const lecturas=getTimelineNotesFromEditor();
   const relatedTimelineIds=normalizeRelatedTimelineIds(getRelatedTimelineIdsFromEditor());
+  const imagenUrl=editTlImagenUrl||null;
   const tl=_timelineCache[activeTimelineId];
-  _timelineCache[activeTimelineId]={...tl,nombre,desc,color,lecturas,relatedTimelineIds};
+  const actualizadoEn=Date.now();
+  _timelineCache[activeTimelineId]={...tl,nombre,desc,privada,color,lecturas,relatedTimelineIds,imagenUrl,actualizadoEn};
   document.getElementById('editor-title').textContent=nombre;
   document.getElementById('editor-desc').textContent=desc;
   document.documentElement.style.setProperty('--accent',color);
@@ -1152,7 +1677,7 @@ async function guardarEdicionTimeline(){
   hideModal('modal-editar-tl');
   toast('Línea de tiempo actualizada ✓');
   try {
-    await updateTimeline(activeTimelineId,{nombre,desc,color,lecturas,relatedTimelineIds});
+    await updateTimeline(activeTimelineId,{nombre,desc,privada,color,lecturas,relatedTimelineIds,imagenUrl,actualizadoEn});
   } catch(e){
     _timelineCache[activeTimelineId]=tl;
     document.getElementById('editor-title').textContent=tl.nombre;
@@ -1176,7 +1701,7 @@ async function eliminarTimeline(){
   try {
     await deleteTimeline(activeTimelineId);
     toast('Línea de tiempo eliminada');
-    await renderHome();
+    await goBackToList();
   } catch(e){ toast('Error al eliminar.'); console.error(e); }
 }
 
@@ -1252,10 +1777,11 @@ async function guardarEvento(){
     }
 
     const eventosOrdenados=ordenarEventos(eventos);
+    const actualizadoEn=Date.now();
     if(_timelineCache[activeTimelineId]){
-      _timelineCache[activeTimelineId]={..._timelineCache[activeTimelineId],eventos:eventosOrdenados};
+      _timelineCache[activeTimelineId]={..._timelineCache[activeTimelineId],eventos:eventosOrdenados,actualizadoEn};
     }
-    await updateTimeline(activeTimelineId,{eventos:eventosOrdenados});
+    await updateTimeline(activeTimelineId,{eventos:eventosOrdenados,actualizadoEn});
     closeEventModal(true);
     hideModal('modal-ver');
     toast('Guardado ✓');
@@ -1275,13 +1801,14 @@ async function eliminarEvento(){
   const tl=_timelineCache[activeTimelineId];
   if(!tl) return;
   const eventos=(tl.eventos||[]).filter(e=>e.id!==editingEventId);
-  _timelineCache[activeTimelineId]={...tl,eventos};
+  const actualizadoEn=Date.now();
+  _timelineCache[activeTimelineId]={...tl,eventos,actualizadoEn};
   closeEventModal(true);
   hideModal('modal-ver');
   toast('Evento eliminado');
   renderTimelineFromCache(_timelineCache[activeTimelineId]);
   try {
-    await updateTimeline(activeTimelineId,{eventos});
+    await updateTimeline(activeTimelineId,{eventos,actualizadoEn});
   } catch(e){
     _timelineCache[activeTimelineId]=tl;
     renderTimelineFromCache(tl);
@@ -1365,7 +1892,11 @@ function openModalNueva(){
   if(!currentUser){ showAuth(); return; }
   document.getElementById('input-nombre').value='';
   document.getElementById('input-desc').value='';
+  document.getElementById('input-privada').checked=false;
   selectColor('#E8845A');
+  pendingTlImagenUrl=null;
+  pendingTlImagenSubiendo=false;
+  renderNuevaTlImagen();
   showModal('modal-nueva');
 }
 
@@ -1375,13 +1906,14 @@ async function crearTimeline(){
   if(!nombre){ shake(document.getElementById('input-nombre')); return; }
   if(!currentUser){ toast('Debes iniciar sesión primero.'); return; }
   const desc=document.getElementById('input-desc').value.trim();
+  const privada=document.getElementById('input-privada').checked;
   const btnCrear=document.getElementById('btn-crear-confirmar');
   isCreatingTimeline=true;
   btnCrear.disabled=true;
   btnCrear.textContent='Creando...';
 
   try {
-    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor});
+    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor,imagenUrl:pendingTlImagenUrl||null,privada});
     hideModal('modal-nueva');
     await openTimeline(ref.id);
     toast('Línea de tiempo creada ✓');
@@ -1426,6 +1958,48 @@ function renderImageGalleryEditor(){
   });
   const addTile=document.getElementById('img-add-tile');
   if(addTile) addTile.addEventListener('click',()=>document.getElementById('ev-imagen').click());
+}
+
+// ─── IMAGEN DE FONDO DE LA LÍNEA DE TIEMPO (una sola imagen) ────
+// Se reutiliza el mismo look de la galería de eventos (.img-gallery-editor),
+// pero acá solo se admite una imagen por línea de tiempo.
+function renderTlImagenEditor(editorId, imageUrl, subiendo, onQuitar, onAgregar){
+  const editor=document.getElementById(editorId);
+  if(!editor) return;
+  if(subiendo){
+    editor.innerHTML=`<div class="img-gallery-uploading">Subiendo…</div>`;
+    return;
+  }
+  if(imageUrl){
+    editor.innerHTML=`
+      <div class="img-gallery-thumb">
+        <img src="${escHtml(imageUrl)}" alt=""/>
+        <button type="button" class="img-gallery-thumb-remove" title="Quitar imagen">✕</button>
+      </div>`;
+    editor.querySelector('.img-gallery-thumb-remove').addEventListener('click',e=>{
+      e.stopPropagation();
+      onQuitar();
+    });
+    return;
+  }
+  editor.innerHTML=`
+    <button type="button" class="img-add-tile" id="${editorId}-add-tile">
+      <span class="img-icon">🖼</span>
+      <span>Agregar imagen</span>
+    </button>`;
+  document.getElementById(`${editorId}-add-tile`).addEventListener('click',onAgregar);
+}
+
+function renderNuevaTlImagen(){
+  renderTlImagenEditor('tl-imagen-editor', pendingTlImagenUrl, pendingTlImagenSubiendo,
+    ()=>{ pendingTlImagenUrl=null; renderNuevaTlImagen(); },
+    ()=>document.getElementById('input-tl-imagen').click());
+}
+
+function renderEditTlImagen(){
+  renderTlImagenEditor('edit-tl-imagen-editor', editTlImagenUrl, editTlImagenSubiendo,
+    ()=>{ editTlImagenUrl=null; renderEditTlImagen(); },
+    ()=>document.getElementById('edit-tl-imagen').click());
 }
 
 function cargarImagenLocal(file){
@@ -1531,12 +2105,22 @@ onAuthStateChanged(auth, async user=>{
   // Muestra el botón para volver a "Lo Mío" solo si el usuario es root.
   document.getElementById('btn-lo-mio-root').classList.toggle('hidden', !isRoot);
 
+  // El botón "Solicitudes" (revisar líneas sugeridas para el inicio)
+  // solo lo ve el usuario root.
+  document.getElementById('btn-solicitudes').classList.toggle('hidden', !isRoot);
+  if(isRoot) refreshSolicitudesBadge();
+  else document.getElementById('solicitudes-badge').classList.add('hidden');
+
   if(user){
     const screenAuth=document.getElementById('screen-auth');
     if(!screenAuth.classList.contains('hidden')){
       await renderHome();
     } else if(document.getElementById('screen-home').classList.contains('active')){
       await renderHome();
+    } else if(document.getElementById('screen-perfil').classList.contains('active') && viewingProfileUid){
+      await renderPerfil(viewingProfileUid);
+    } else if(document.getElementById('screen-solicitudes').classList.contains('active')){
+      await renderSolicitudes();
     } else {
       updateHeader(user);
     }
@@ -1551,6 +2135,14 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-acceder').addEventListener('click',showAuth);
   document.getElementById('btn-nueva').addEventListener('click',openModalNueva);
   document.getElementById('btn-logout').addEventListener('click',logout);
+  document.getElementById('btn-mi-perfil').addEventListener('click',()=>{
+    if(!currentUser){ showAuth(); return; }
+    renderPerfil(currentUser.uid);
+  });
+  document.getElementById('btn-perfil-back').addEventListener('click',renderHome);
+  document.getElementById('btn-nueva-perfil').addEventListener('click',openModalNueva);
+  document.getElementById('btn-solicitudes').addEventListener('click',renderSolicitudes);
+  document.getElementById('btn-solicitudes-back').addEventListener('click',renderHome);
 
   document.getElementById('btn-activar-seleccion').addEventListener('click',()=>setModoSeleccion(true));
   document.getElementById('btn-cancelar-seleccion').addEventListener('click',()=>setModoSeleccion(false));
@@ -1600,7 +2192,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     if(!closeEventModal()) return;
     document.documentElement.style.setProperty('--accent','#E8845A');
     document.documentElement.style.setProperty('--accent-glow','rgba(232,132,90,0.18)');
-    await renderHome();
+    await goBackToList();
   });
   document.getElementById('btn-add-event').addEventListener('click',()=>openModalEvento(null));
 
@@ -1608,6 +2200,40 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-guardar-evento').addEventListener('click',guardarEvento);
   document.getElementById('btn-eliminar-evento').addEventListener('click',eliminarEvento);
   document.getElementById('btn-add-sub-event').addEventListener('click',()=>addSubtimelineRow());
+
+  document.getElementById('input-tl-imagen').addEventListener('change',async e=>{
+    const file=e.target.files[0];
+    e.target.value='';
+    if(!file) return;
+    pendingTlImagenSubiendo=true;
+    renderNuevaTlImagen();
+    try {
+      pendingTlImagenUrl=await subirImagenCloudinary(file);
+    } catch(err){
+      console.error(err);
+      toast('No se pudo subir la imagen. Intenta de nuevo.');
+    } finally {
+      pendingTlImagenSubiendo=false;
+      renderNuevaTlImagen();
+    }
+  });
+
+  document.getElementById('edit-tl-imagen').addEventListener('change',async e=>{
+    const file=e.target.files[0];
+    e.target.value='';
+    if(!file) return;
+    editTlImagenSubiendo=true;
+    renderEditTlImagen();
+    try {
+      editTlImagenUrl=await subirImagenCloudinary(file);
+    } catch(err){
+      console.error(err);
+      toast('No se pudo subir la imagen. Intenta de nuevo.');
+    } finally {
+      editTlImagenSubiendo=false;
+      renderEditTlImagen();
+    }
+  });
 
   const galleryEditor=document.getElementById('img-gallery-editor');
   document.getElementById('ev-imagen').addEventListener('change',e=>{
