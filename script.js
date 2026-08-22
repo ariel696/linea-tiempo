@@ -109,6 +109,12 @@ let perfilSortBy      = 'recent';
 let perfilSearchQuery = '';
 let _perfilTimelinesRaw = [];
 
+// Vista activa dentro del perfil/muro: 'lineas' (grilla normal) o
+// 'stats' (resumen tipo "logros"). Se resetea a 'lineas' cada vez que
+// se entra a un perfil distinto, para no dejar a alguien "atrapado"
+// en la vista de estadísticas de otra persona.
+let perfilViewMode = 'lineas';
+
 // Imagen de fondo de la línea de tiempo (modal Nueva y modal Editar).
 // Solo una imagen por línea, a diferencia de la galería de eventos.
 let pendingTlImagenUrl      = null;
@@ -903,6 +909,111 @@ function buildActividadRow(tl){
   return row;
 }
 
+// ─── "ME GUSTA" EN LÍNEAS DE TIEMPO ─────────────────────────
+// El campo "likes" es un arreglo de uids en el documento de la línea
+// de tiempo. Solo alguien que no sea el dueño puede darle "me gusta".
+// El dueño puede ver cuántos lleva, pero no puede dárselo a sí mismo.
+function getLikesArray(tl){
+  return Array.isArray(tl && tl.likes) ? tl.likes : [];
+}
+
+// Refleja un cambio de "likes" en todas las copias locales que
+// tenemos de esa línea de tiempo (la del detalle, la de la lista de
+// inicio y la del perfil), para que cualquier pantalla que se
+// redibuje después muestre el dato correcto sin tener que recargar
+// desde Firestore.
+function setLikesLocal(id, likes){
+  if(_timelineCache[id]) _timelineCache[id]={..._timelineCache[id],likes};
+  if(_timelinesCache){
+    const idx=_timelinesCache.findIndex(t=>t.id===id);
+    if(idx>-1) _timelinesCache[idx]={..._timelinesCache[idx],likes};
+  }
+  const hIdx=_homeTimelinesRaw.findIndex(t=>t.id===id);
+  if(hIdx>-1) _homeTimelinesRaw[hIdx]={..._homeTimelinesRaw[hIdx],likes};
+  const pIdx=_perfilTimelinesRaw.findIndex(t=>t.id===id);
+  if(pIdx>-1) _perfilTimelinesRaw[pIdx]={..._perfilTimelinesRaw[pIdx],likes};
+}
+
+// Actualiza en el DOM todos los botones de "me gusta" de una línea de
+// tiempo puntual (puede aparecer en el inicio y en un perfil a la
+// vez), sin necesidad de redibujar toda la grilla.
+function actualizarBotonLike(id, likes){
+  const count=(likes||[]).length;
+  const likedByMe=!!(currentUser && likes.includes(currentUser.uid));
+  document.querySelectorAll(`.btn-like[data-id="${id}"]`).forEach(btn=>{
+    btn.classList.toggle('liked', likedByMe);
+    const heart=btn.querySelector('.like-heart');
+    const countEl=btn.querySelector('.like-count');
+    if(heart) heart.textContent = likedByMe ? '❤️' : '🤍';
+    if(countEl) countEl.textContent = count;
+  });
+}
+
+// Marca/desmarca el "me gusta" del usuario actual sobre una línea de
+// tiempo. Actualiza primero en pantalla (para que se sienta instantáneo)
+// y luego guarda en Firestore; si falla, revierte.
+async function toggleLike(tl){
+  if(!currentUser){ showAuth(); return; }
+  if(tl.ownerId===currentUser.uid){
+    toast('No puedes darle "me gusta" a tu propia línea de tiempo.');
+    return;
+  }
+  const likesActuales=getLikesArray(tl);
+  const yaLeGusta=likesActuales.includes(currentUser.uid);
+  const likes=yaLeGusta
+    ? likesActuales.filter(uid=>uid!==currentUser.uid)
+    : [...likesActuales,currentUser.uid];
+
+  setLikesLocal(tl.id,likes);
+  actualizarBotonLike(tl.id,likes);
+  // Si estamos parados justo en la vista de estadísticas de un perfil,
+  // el total de "me gusta" del muro también cambia al instante.
+  const perfilScreen=document.getElementById('screen-perfil');
+  if(perfilScreen && perfilScreen.classList.contains('active') && perfilViewMode==='stats'){
+    renderPerfilStats();
+  }
+
+  try {
+    await updateTimeline(tl.id,{likes});
+  } catch(err){
+    console.error(err);
+    setLikesLocal(tl.id,likesActuales);
+    actualizarBotonLike(tl.id,likesActuales);
+    toast('No se pudo guardar el "me gusta". Intenta de nuevo.');
+  }
+}
+
+// Construye la fila con el botón de "me gusta" que va debajo de cada
+// tarjeta de línea de tiempo (tanto en el inicio como en el perfil).
+function buildLikeRow(tl){
+  const row=document.createElement('div');
+  row.className='like-row';
+  const likes=getLikesArray(tl);
+  const count=likes.length;
+  const esPropia=!!(currentUser && tl.ownerId===currentUser.uid);
+  const likedByMe=!!(currentUser && likes.includes(currentUser.uid));
+
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='btn-like'+(likedByMe?' liked':'')+(esPropia?' disabled':'');
+  btn.dataset.id=tl.id;
+  btn.title = esPropia
+    ? 'No puedes darle "me gusta" a tu propia línea de tiempo'
+    : (likedByMe ? 'Quitar me gusta' : 'Dar me gusta');
+  btn.innerHTML = `<span class="like-heart">${likedByMe?'❤️':'🤍'}</span><span class="like-count">${count}</span>`;
+  btn.addEventListener('click',e=>{
+    e.stopPropagation();
+    if(esPropia){
+      toast('No puedes darle "me gusta" a tu propia línea de tiempo.');
+      return;
+    }
+    toggleLike(tl);
+  });
+
+  row.appendChild(btn);
+  return row;
+}
+
 // Filtra por nombre (si hay texto buscado) y ordena según el modo
 // elegido. Devuelve un arreglo nuevo, sin modificar el original.
 function filtrarYOrdenarTimelines(lista, query, sortBy){
@@ -1048,10 +1159,13 @@ function renderHomeCards(){
   } else {
     empty.style.display='none';
     otras.forEach((tl,i)=>{
+      const wrap=document.createElement('div');
+      wrap.className='timeline-card-wrap';
+      wrap.style.animationDelay=(i*0.07)+'s';
+
       const card=document.createElement('div');
       card.className='timeline-card';
       card.style.setProperty('--card-accent',tl.color||'#E8845A');
-      card.style.animationDelay=(i*0.07)+'s';
       const count=(tl.eventos||[]).length;
       const esPropia=currentUser&&tl.ownerId===currentUser.uid;
       const ownerLabel=tl.ownerName?`<span class="card-owner card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">por ${escHtml(tl.ownerName)}</span>`:'';
@@ -1095,7 +1209,12 @@ function renderHomeCards(){
           renderPerfil(tl.ownerId);
         });
       }
-      grid.appendChild(card);
+      wrap.appendChild(card);
+      // El modo selección (para borrar en lote) es solo para tarjetas
+      // propias; ocultamos el botón de "me gusta" mientras tanto para
+      // no estorbar el flujo de selección.
+      if(!(modoSeleccion && puedeBorrar)) wrap.appendChild(buildLikeRow(tl));
+      grid.appendChild(wrap);
     });
   }
 }
@@ -1113,6 +1232,7 @@ async function renderPerfil(uid){
   if(viewingProfileUid!==uid){
     perfilSearchQuery='';
     perfilSortBy='recent';
+    perfilViewMode='lineas';
   }
   viewingProfileUid=uid;
   lastListScreen='perfil';
@@ -1178,6 +1298,102 @@ async function renderPerfil(uid){
   });
 
   renderPerfilCards(perfilEmptyBaseMsg);
+  applyPerfilViewMode();
+}
+
+// Muestra la sección de "Líneas de tiempo" o la de "Estadísticas del
+// perfil" según perfilViewMode, y deja el botón con el texto correcto.
+function applyPerfilViewMode(){
+  const btn = document.getElementById('btn-toggle-perfil-stats');
+  const lineasSection = document.getElementById('perfil-lineas-section');
+  const statsSection = document.getElementById('perfil-stats-section');
+  if(perfilViewMode==='stats'){
+    lineasSection.classList.add('hidden');
+    statsSection.classList.remove('hidden');
+    btn.textContent = '← Ver líneas de tiempo';
+    renderPerfilStats();
+  } else {
+    statsSection.classList.add('hidden');
+    lineasSection.classList.remove('hidden');
+    btn.textContent = '📊 Estadísticas del perfil';
+  }
+}
+
+// Calcula y dibuja las tarjetas de "logros" del perfil: total de
+// líneas, total de eventos creados, línea más antigua y línea con
+// más eventos. Usa _perfilTimelinesRaw, que ya viene filtrado por
+// privacidad (solo lo que quien mira puede ver).
+function renderPerfilStats(){
+  const grid = document.getElementById('perfil-stats-grid');
+  const empty = document.getElementById('perfil-stats-empty');
+  const lista = _perfilTimelinesRaw || [];
+  grid.innerHTML = '';
+
+  if(lista.length===0){
+    empty.classList.remove('hidden');
+    grid.classList.add('hidden');
+    return;
+  }
+  empty.classList.add('hidden');
+  grid.classList.remove('hidden');
+
+  const totalLineas = lista.length;
+  const totalEventos = lista.reduce((sum,tl)=>sum+(tl.eventos||[]).length,0);
+  const totalLikes = lista.reduce((sum,tl)=>sum+getLikesArray(tl).length,0);
+
+  let masAntigua = lista[0];
+  lista.forEach(tl=>{ if(getCreadoEnMillis(tl) < getCreadoEnMillis(masAntigua)) masAntigua = tl; });
+
+  let masEventos = lista[0];
+  lista.forEach(tl=>{ if((tl.eventos||[]).length > (masEventos.eventos||[]).length) masEventos = tl; });
+
+  const antiguaMillis = getCreadoEnMillis(masAntigua);
+  const numEventosDestacada = (masEventos.eventos||[]).length;
+
+  const cards = [
+    {
+      icon:'📚',
+      value: String(totalLineas),
+      label: totalLineas===1 ? 'línea de tiempo' : 'líneas de tiempo'
+    },
+    {
+      icon:'✨',
+      value: String(totalEventos),
+      label: totalEventos===1 ? 'evento creado' : 'eventos creados'
+    },
+    {
+      icon:'❤️',
+      value: String(totalLikes),
+      label: totalLikes===1 ? 'me gusta recibido' : 'me gusta recibidos'
+    },
+    {
+      icon:'🕰️',
+      value: escHtml(masAntigua.nombre||'Sin nombre'),
+      label: 'línea más antigua',
+      sub: antiguaMillis ? `Creada hace ${formatTiempoRelativo(antiguaMillis).replace('hace ','')}` : null,
+      textValue: true
+    },
+    {
+      icon:'🏆',
+      value: escHtml(masEventos.nombre||'Sin nombre'),
+      label: 'línea con más eventos',
+      sub: `${numEventosDestacada} evento${numEventosDestacada===1?'':'s'}`,
+      textValue: true
+    }
+  ];
+
+  cards.forEach((c,i)=>{
+    const card=document.createElement('div');
+    card.className='stat-card';
+    card.style.animationDelay=(i*0.07)+'s';
+    card.innerHTML = `
+      <span class="stat-card-icon">${c.icon}</span>
+      <div class="stat-card-value${c.textValue?' stat-value-text':''}">${c.value}</div>
+      <div class="stat-card-label">${c.label}</div>
+      ${c.sub?`<div class="stat-card-sub">${escHtml(c.sub)}</div>`:''}
+    `;
+    grid.appendChild(card);
+  });
 }
 
 // Dibuja las tarjetas del perfil a partir de _perfilTimelinesRaw,
@@ -1218,6 +1434,7 @@ function renderPerfilCards(emptyBaseMsg){
         <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>`;
       card.addEventListener('click',()=>openTimeline(tl.id));
       wrap.appendChild(card);
+      wrap.appendChild(buildLikeRow(tl));
 
       const activityRow=buildActividadRow(tl);
       if(activityRow) wrap.appendChild(activityRow);
@@ -2141,6 +2358,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   document.getElementById('btn-perfil-back').addEventListener('click',renderHome);
   document.getElementById('btn-nueva-perfil').addEventListener('click',openModalNueva);
+  document.getElementById('btn-toggle-perfil-stats').addEventListener('click',()=>{
+    perfilViewMode = perfilViewMode==='stats' ? 'lineas' : 'stats';
+    applyPerfilViewMode();
+  });
   document.getElementById('btn-solicitudes').addEventListener('click',renderSolicitudes);
   document.getElementById('btn-solicitudes-back').addEventListener('click',renderHome);
 

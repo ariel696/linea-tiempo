@@ -177,8 +177,9 @@
           <h2 id="perfil-nombre" class="perfil-nombre"></h2>
           <p id="perfil-count" class="perfil-count"></p>
         </div>
+        <button class="btn-secondary sm perfil-stats-toggle" id="btn-toggle-perfil-stats">📊 Estadísticas del perfil</button>
       </div>
-      <section class="timelines-section">
+      <section class="timelines-section" id="perfil-lineas-section">
         <div class="timelines-section-header">
           <h2 class="section-title" id="perfil-grid-title">Líneas de tiempo</h2>
           <button class="btn-primary sm hidden" id="btn-nueva-perfil">
@@ -209,6 +210,18 @@
             <p>Aún no hay líneas de tiempo aquí.</p>
           </div>
         </div>
+      </section>
+
+      <!-- ====== ESTADÍSTICAS DEL PERFIL (vista alternativa) ====== -->
+      <section class="perfil-stats-section hidden" id="perfil-stats-section">
+        <div class="timelines-section-header">
+          <h2 class="section-title">Estadísticas del perfil</h2>
+        </div>
+        <div id="perfil-stats-empty" class="empty-state hidden">
+          <div class="empty-icon">◎</div>
+          <p>Aún no hay datos suficientes para mostrar estadísticas.</p>
+        </div>
+        <div id="perfil-stats-grid" class="perfil-stats-grid"></div>
       </section>
     </main>
   </div>
