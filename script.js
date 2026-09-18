@@ -87,6 +87,7 @@ const gProvider = new GoogleAuthProvider();
 let currentUser        = null;
 let isRoot             = false;
 let activeTimelineId   = null;
+let activeTimelineSectionFilter = '';
 let editingEventId     = null;
 let selectedColor      = "#E8845A";
 let selectedEditColor  = "#E8845A";
@@ -104,6 +105,7 @@ let lastListScreen     = 'home';
 let homeSortBy       = 'recent';
 let homeSearchQuery  = '';
 let _homeTimelinesRaw  = [];
+let _homeSearchTimelinesRaw = [];
 
 let perfilSortBy      = 'recent';
 let perfilSearchQuery = '';
@@ -114,6 +116,11 @@ let _perfilTimelinesRaw = [];
 // se entra a un perfil distinto, para no dejar a alguien "atrapado"
 // en la vista de estadísticas de otra persona.
 let perfilViewMode = 'lineas';
+let initialRouteHandled = false;
+
+let relatedEditorCurrentId = null;
+let relatedEditorSelectedIds = [];
+let relatedEditorOptions = [];
 
 // Imagen de fondo de la línea de tiempo (modal Nueva y modal Editar).
 // Solo una imagen por línea, a diferencia de la galería de eventos.
@@ -163,6 +170,74 @@ function shake(el){
   setTimeout(()=>el.style.animation='',400);
 }
 
+const SOCIAL_PLATFORMS = [
+  { key:'instagram', label:'Instagram', base:'https://www.instagram.com/' },
+  { key:'facebook', label:'Facebook', base:'https://www.facebook.com/' },
+  { key:'youtube', label:'YouTube', base:'https://www.youtube.com/' },
+  { key:'kick', label:'Kick', base:'https://kick.com/' },
+  { key:'tiktok', label:'TikTok', base:'https://www.tiktok.com/@' }
+];
+
+function normalizeSocialUrl(platformKey,value){
+  let v=String(value||'').trim();
+  if(!v) return '';
+  if(/^https?:\/\//i.test(v)) return v;
+  if(/^www\./i.test(v)) return `https://${v}`;
+  v=v.replace(/^@/,'').replace(/^\/+/,'').trim();
+  if(!v) return '';
+  const platform=SOCIAL_PLATFORMS.find(p=>p.key===platformKey);
+  if(!platform) return '';
+  if(platformKey==='youtube') return platform.base+(v.includes('/')?v:'@'+v);
+  if(platformKey==='tiktok') return platform.base+v.replace(/^@/,'');
+  return platform.base+v;
+}
+
+function getSocialsFromInputs(prefix){
+  return SOCIAL_PLATFORMS.reduce((out,platform)=>{
+    const input=document.getElementById(`${prefix}-social-${platform.key}`);
+    const url=normalizeSocialUrl(platform.key,input&&input.value);
+    if(url) out[platform.key]=url;
+    return out;
+  },{});
+}
+
+function setSocialInputs(prefix,socials={}){
+  SOCIAL_PLATFORMS.forEach(platform=>{
+    const input=document.getElementById(`${prefix}-social-${platform.key}`);
+    if(input) input.value=(socials&&socials[platform.key])||'';
+  });
+}
+
+function hasSocialLinks(socials={}){
+  return SOCIAL_PLATFORMS.some(platform=>!!(socials&&socials[platform.key]));
+}
+
+function setEditSocialEnabled(enabled){
+  const checkbox=document.getElementById('edit-social-enabled');
+  const fields=document.getElementById('edit-social-fields');
+  if(checkbox) checkbox.checked=!!enabled;
+  if(fields) fields.classList.toggle('hidden',!enabled);
+  if(!enabled) setSocialInputs('edit',{});
+}
+
+function renderOwnerSocialLinks(tl){
+  const wrap=document.getElementById('editor-social-links');
+  if(!wrap) return;
+  const socials=tl&&tl.ownerSocials?tl.ownerSocials:{};
+  const links=SOCIAL_PLATFORMS
+    .map(platform=>({ ...platform, url:socials[platform.key] }))
+    .filter(item=>/^https?:\/\//i.test(item.url||''));
+  if(!links.length){
+    wrap.classList.add('hidden');
+    wrap.innerHTML='';
+    return;
+  }
+  wrap.innerHTML=links.map(item=>
+    `<a class="editor-social-link" href="${escHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escHtml(item.label)}</a>`
+  ).join('');
+  wrap.classList.remove('hidden');
+}
+
 function showModal(id){ document.getElementById(id).classList.remove('hidden'); }
 function hideModal(id){ document.getElementById(id).classList.add('hidden'); }
 
@@ -174,6 +249,54 @@ function showScreen(name){
   const el = document.getElementById('screen-'+name);
   el.classList.remove('hidden');
   el.classList.add('active');
+}
+
+function getRoute(){
+  const params=new URLSearchParams(window.location.search);
+  return {
+    perfil: params.get('perfil') || ''
+  };
+}
+
+function buildProfileUrl(uid){
+  const url=new URL(window.location.href);
+  url.search='';
+  url.hash='';
+  url.searchParams.set('perfil',uid);
+  return url.toString();
+}
+
+function setRoute(route={},replace=false){
+  const url=new URL(window.location.href);
+  url.search='';
+  url.hash='';
+  if(route.perfil) url.searchParams.set('perfil',route.perfil);
+  const next=url.pathname+url.search+url.hash;
+  const current=window.location.pathname+window.location.search+window.location.hash;
+  if(next===current) return;
+  const fn=replace?'replaceState':'pushState';
+  window.history[fn]({},'',next);
+}
+
+async function copyCurrentProfileLink(){
+  if(!viewingProfileUid) return;
+  const link=buildProfileUrl(viewingProfileUid);
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Enlace del perfil copiado ✓');
+  } catch(e){
+    console.error(e);
+    window.prompt('Copia el enlace del perfil:',link);
+  }
+}
+
+async function openRouteFromUrl(){
+  const route=getRoute();
+  if(route.perfil){
+    await renderPerfil(route.perfil,{skipRouteUpdate:true,forceLineas:true});
+    return;
+  }
+  await renderHome({skipRouteUpdate:true});
 }
 
 function setAuthError(msg){
@@ -395,6 +518,116 @@ function getYearLabel(fecha){
   const match=String(fecha||'').match(/\d{4}/);
   return match ? match[0] : '';
 }
+function normalizeTimelineSections(secciones){
+  return [...(secciones||[])]
+    .map(section=>({
+      id: section.id || uid(),
+      nombre: String(section.nombre||'').trim()
+    }))
+    .filter(section=>section.nombre);
+}
+
+function getTimelineSectionsFromEditor(){
+  return [...document.querySelectorAll('.timeline-section-row')].map(row=>({
+    id: row.dataset.sectionId || uid(),
+    nombre: row.querySelector('.timeline-section-name').value.trim()
+  })).filter(section=>section.nombre);
+}
+
+function addTimelineSectionRow(section={}){
+  const editor=document.getElementById('timeline-sections-editor');
+  if(!editor) return;
+  editor.querySelector('.timeline-sections-empty')?.remove();
+  const row=document.createElement('div');
+  row.className='timeline-section-row';
+  row.dataset.sectionId=section.id||uid();
+  row.innerHTML=`
+    <input class="timeline-section-name" type="text" placeholder="Ej: Toei Animation" value="${escHtml(section.nombre||'')}"/>
+    <button type="button" class="timeline-section-remove" title="Quitar sección">×</button>`;
+  row.querySelector('.timeline-section-remove').addEventListener('click',()=>row.remove());
+  editor.appendChild(row);
+}
+
+function resetTimelineSectionsEditor(secciones=[]){
+  const editor=document.getElementById('timeline-sections-editor');
+  if(!editor) return;
+  editor.innerHTML='';
+  const items=normalizeTimelineSections(secciones);
+  if(!items.length){
+    const empty=document.createElement('div');
+    empty.className='timeline-sections-empty';
+    empty.textContent='Todavía no hay secciones agregadas.';
+    editor.appendChild(empty);
+    return;
+  }
+  items.forEach(addTimelineSectionRow);
+}
+
+function getTimelineSectionById(tl,sectionId){
+  if(!sectionId) return null;
+  return normalizeTimelineSections(tl&&tl.secciones).find(section=>section.id===sectionId) || null;
+}
+
+function getEventSectionHtml(ev,tl){
+  const section=getTimelineSectionById(tl,ev&&ev.seccionId);
+  return section ? `<div class="event-section-pill">${escHtml(section.nombre)}</div>` : '';
+}
+
+function renderEventSectionSelect(tl,selectedId=''){
+  const select=document.getElementById('ev-seccion');
+  if(!select) return;
+  const sections=normalizeTimelineSections(tl&&tl.secciones);
+  select.innerHTML='<option value="">Sin sección</option>'+sections.map(section=>
+    `<option value="${escHtml(section.id)}">${escHtml(section.nombre)}</option>`
+  ).join('');
+  const exists=sections.some(section=>section.id===selectedId);
+  select.value=exists?selectedId:'';
+}
+
+function getFilteredTimelineEvents(tl){
+  const eventos=ordenarEventos(tl.eventos||[]);
+  if(!activeTimelineSectionFilter) return eventos;
+  return eventos.filter(ev=>ev.seccionId===activeTimelineSectionFilter);
+}
+
+function renderTimelineSectionFilters(tl){
+  const wrap=document.getElementById('timeline-section-filters');
+  if(!wrap) return;
+  const sections=normalizeTimelineSections(tl&&tl.secciones);
+  if(!sections.length){
+    activeTimelineSectionFilter='';
+    wrap.classList.add('hidden');
+    wrap.innerHTML='';
+    return;
+  }
+  const activeExists=sections.some(section=>section.id===activeTimelineSectionFilter);
+  if(activeTimelineSectionFilter&&!activeExists) activeTimelineSectionFilter='';
+  wrap.classList.remove('hidden');
+  wrap.innerHTML=[
+    `<button type="button" class="timeline-section-filter ${activeTimelineSectionFilter?'':'active'}" data-section-id="">Todas</button>`,
+    ...sections.map(section=>
+      `<button type="button" class="timeline-section-filter ${activeTimelineSectionFilter===section.id?'active':''}" data-section-id="${escHtml(section.id)}">${escHtml(section.nombre)}</button>`
+    )
+  ].join('');
+  wrap.querySelectorAll('.timeline-section-filter').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      activeTimelineSectionFilter=btn.dataset.sectionId||'';
+      renderTimelineFromCache(tl);
+    });
+  });
+}
+function renderEventSectionView(ev,tl){
+  const el=document.getElementById('ver-seccion');
+  if(!el) return;
+  const section=getTimelineSectionById(tl,ev&&ev.seccionId);
+  if(!section){
+    el.classList.add('hidden');
+    el.textContent='';
+    return;
+  }
+  el.textContent=section.nombre;
+  el.className='event-section-pill';
+}
 const NOTE_SCALE_MIN=0.7;
 const NOTE_SCALE_MAX=2;
 
@@ -479,25 +712,85 @@ function normalizeRelatedTimelineIds(ids){
 }
 
 function getRelatedTimelineIdsFromEditor(){
-  return [...document.querySelectorAll('.related-timeline-check:checked')].map(input=>input.value);
+  return normalizeRelatedTimelineIds(relatedEditorSelectedIds);
 }
 
 function resetRelatedTimelinesEditor(currentId,relatedIds=[],timelines=[]){
   const editor=document.getElementById('related-timelines-editor');
   if(!editor) return;
-  const selected=new Set(normalizeRelatedTimelineIds(relatedIds));
-  const options=[...(timelines||[])].filter(tl=>tl.id&&tl.id!==currentId);
-  if(options.length===0){
+  relatedEditorCurrentId=currentId;
+  relatedEditorSelectedIds=normalizeRelatedTimelineIds(relatedIds);
+  relatedEditorOptions=[...(timelines||[])]
+    .filter(tl=>tl.id&&tl.id!==currentId)
+    .sort((a,b)=>(a.nombre||'').localeCompare(b.nombre||'','es',{sensitivity:'base'}));
+  renderRelatedTimelinesEditor('');
+}
+
+function renderRelatedTimelinesEditor(query=''){
+  const editor=document.getElementById('related-timelines-editor');
+  if(!editor) return;
+  if(relatedEditorOptions.length===0){
     editor.innerHTML='<span class="related-timelines-empty">Crea otra linea de tiempo para poder vincularla.</span>';
     return;
   }
-  editor.innerHTML=options.map(tl=>{
-    const count=(tl.eventos||[]).length;
-    return `<label class="related-timeline-option">
-      <input class="related-timeline-check" type="checkbox" value="${escHtml(tl.id)}" ${selected.has(tl.id)?'checked':''}/>
-      <span><strong>${escHtml(tl.nombre||'Sin titulo')}</strong><small>${count} evento${count===1?'':'s'}</small></span>
-    </label>`;
-  }).join('');
+
+  const selected=new Set(relatedEditorSelectedIds);
+  const selectedItems=relatedEditorSelectedIds
+    .map(id=>relatedEditorOptions.find(tl=>tl.id===id))
+    .filter(Boolean);
+  const q=String(query||'').trim().toLowerCase();
+  const suggestions=q
+    ? relatedEditorOptions
+        .filter(tl=>!selected.has(tl.id))
+        .filter(tl=>[
+          tl.nombre||'',
+          tl.desc||'',
+          tl.ownerName||''
+        ].join(' ').toLowerCase().includes(q))
+        .slice(0,6)
+    : [];
+
+  const chipsHtml=selectedItems.length
+    ? selectedItems.map(tl=>`<button type="button" class="related-selected-chip" data-id="${escHtml(tl.id)}">${escHtml(tl.nombre||'Sin titulo')} <span>×</span></button>`).join('')
+    : '<span class="related-timelines-empty">Todavía no hay líneas relacionadas agregadas.</span>';
+
+  const suggestionsHtml=q
+    ? (suggestions.length
+        ? suggestions.map(tl=>{
+            const count=(tl.eventos||[]).length;
+            return `<button type="button" class="related-suggestion" data-id="${escHtml(tl.id)}">
+              <strong>${escHtml(tl.nombre||'Sin titulo')}</strong>
+              <small>${count} evento${count===1?'':'s'}${tl.ownerName?` · por ${escHtml(tl.ownerName)}`:''}</small>
+            </button>`;
+          }).join('')
+        : '<span class="related-timelines-empty">No encontramos coincidencias.</span>')
+    : '<span class="related-timelines-empty">Escribe para buscar una línea de tiempo y haz clic para relacionarla.</span>';
+
+  editor.innerHTML=`
+    <div class="related-search-box">
+      <span class="search-icon">⌕</span>
+      <input type="text" class="related-search-input" placeholder="Buscar línea de tiempo..." value="${escHtml(query)}" autocomplete="off"/>
+    </div>
+    <div class="related-selected-list">${chipsHtml}</div>
+    <div class="related-suggestions-list">${suggestionsHtml}</div>`;
+
+  const input=editor.querySelector('.related-search-input');
+  input.focus();
+  input.setSelectionRange(input.value.length,input.value.length);
+  input.addEventListener('input',()=>renderRelatedTimelinesEditor(input.value));
+  editor.querySelectorAll('.related-suggestion').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const id=btn.dataset.id;
+      if(id&&!relatedEditorSelectedIds.includes(id)) relatedEditorSelectedIds.push(id);
+      renderRelatedTimelinesEditor('');
+    });
+  });
+  editor.querySelectorAll('.related-selected-chip').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      relatedEditorSelectedIds=relatedEditorSelectedIds.filter(id=>id!==btn.dataset.id);
+      renderRelatedTimelinesEditor(input.value);
+    });
+  });
 }
 
 async function renderRelatedTimelinesPanel(tl){
@@ -679,6 +972,22 @@ function getEventImages(ev){
   return [];
 }
 
+function getVerifyStatusHtml(ev){
+  const confirmed=!!(ev&&ev.infoConfirmada);
+  const label=confirmed?'Información confirmada':'Falta verificar';
+  const cls=confirmed?'confirmed':'pending';
+  return `<div class="event-verify-status ${cls}">${label}</div>`;
+}
+
+function renderVerifyStatus(elementId,ev){
+  const el=document.getElementById(elementId);
+  if(!el) return;
+  const confirmed=!!(ev&&ev.infoConfirmada);
+  el.textContent=confirmed?'Información confirmada':'Falta verificar';
+  el.className=`event-verify-status ${confirmed?'confirmed':'pending'}`;
+  el.classList.remove('hidden');
+}
+
 function ordenarSubEventos(items){
   return [...(items||[])].sort((a,b)=>extraerAnio(a.fecha)-extraerAnio(b.fecha));
 }
@@ -706,9 +1015,11 @@ function addSubtimelineRow(item={}){
 
 function getEventDraftSnapshot(){
   return {
+    infoConfirmada: document.getElementById('ev-info-confirmada').checked,
     titulo: document.getElementById('ev-titulo').value.trim(),
     fecha: document.getElementById('ev-fecha').value.trim(),
     descripcion: document.getElementById('ev-descripcion').value.trim(),
+    seccionId: document.getElementById('ev-seccion').value||'',
     imagenes: [...pendingImages],
     subEventos: ordenarSubEventos(getSubtimelineFromEditor())
   };
@@ -835,11 +1146,15 @@ async function renderHomePrincipalTimeline(timelines){
       const imgHtml=evThumb?`<img class="event-thumbnail" src="${evThumb}" alt=""/>`:'';
       const descHtml=ev.descripcion?`<div class="event-descripcion">${escHtml(ev.descripcion)}</div>`:'';
       const yearHtml=getYearLabel(ev.fecha)?`<div class="event-year">${getYearLabel(ev.fecha)}</div>`:'';
+      const verifyHtml=getVerifyStatusHtml(ev);
+      const sectionHtml=getEventSectionHtml(ev,principal);
       item.innerHTML=`
         <div class="event-spacer"></div>
         ${yearHtml}
         <div class="event-card">
           ${imgHtml}
+          ${verifyHtml}
+          ${sectionHtml}
           <div class="event-titulo">${escHtml(ev.titulo)}</div>
           ${descHtml}
         </div>
@@ -983,11 +1298,9 @@ async function toggleLike(tl){
   }
 }
 
-// Construye la fila con el botón de "me gusta" que va debajo de cada
-// tarjeta de línea de tiempo (tanto en el inicio como en el perfil).
-function buildLikeRow(tl){
-  const row=document.createElement('div');
-  row.className='like-row';
+// Construye el botón de "me gusta" que va dentro de cada tarjeta de
+// línea de tiempo, en la esquina superior izquierda.
+function buildLikeButton(tl){
   const likes=getLikesArray(tl);
   const count=likes.length;
   const esPropia=!!(currentUser && tl.ownerId===currentUser.uid);
@@ -995,7 +1308,7 @@ function buildLikeRow(tl){
 
   const btn=document.createElement('button');
   btn.type='button';
-  btn.className='btn-like'+(likedByMe?' liked':'')+(esPropia?' disabled':'');
+  btn.className='btn-like card-like'+(likedByMe?' liked':'')+(esPropia?' disabled':'');
   btn.dataset.id=tl.id;
   btn.title = esPropia
     ? 'No puedes darle "me gusta" a tu propia línea de tiempo'
@@ -1010,15 +1323,41 @@ function buildLikeRow(tl){
     toggleLike(tl);
   });
 
+  return btn;
+}
+
+// Conserva el envoltorio para otras zonas que aún necesiten una fila.
+function buildLikeRow(tl){
+  const row=document.createElement('div');
+  row.className='like-row';
+  const btn=buildLikeButton(tl);
+  btn.classList.remove('card-like');
   row.appendChild(btn);
   return row;
+}
+
+function buildTimelineCardInfo(tl,count,extraHtml=''){
+  const info=document.createElement('div');
+  info.className='timeline-card-info';
+  info.innerHTML=`
+    <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
+    <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>
+    ${extraHtml}`;
+  return info;
 }
 
 // Filtra por nombre (si hay texto buscado) y ordena según el modo
 // elegido. Devuelve un arreglo nuevo, sin modificar el original.
 function filtrarYOrdenarTimelines(lista, query, sortBy){
   const q=(query||'').trim().toLowerCase();
-  let out = q ? lista.filter(tl=>(tl.nombre||'').toLowerCase().includes(q)) : [...lista];
+  let out = q ? lista.filter(tl=>{
+    const texto=[
+      tl.nombre||'',
+      tl.desc||'',
+      tl.ownerName||''
+    ].join(' ').toLowerCase();
+    return texto.includes(q);
+  }) : [...lista];
   switch(sortBy){
     case 'oldest':
       out.sort((a,b)=>getCreadoEnMillis(a)-getCreadoEnMillis(b));
@@ -1103,7 +1442,8 @@ function setupTimelinesToolbar({ searchInputId, sortToggleId, sortMenuId, getSor
   syncSortUI();
 }
 
-async function renderHome(){
+async function renderHome(options={}){
+  if(!options.skipRouteUpdate) setRoute({});
   lastListScreen='home';
   const seq=++_renderHomeSeq;
   showScreen('home');
@@ -1113,11 +1453,10 @@ async function renderHome(){
   try { timelines=await fetchTimelines(); } catch(e){ console.error(e); }
   if(seq!==_renderHomeSeq) return;
 
-  // El inicio es una vitrina curada: solo muestra líneas de tiempo que
-  // el usuario root aprobó explícitamente como "destacadas". Todas las
-  // demás (nuevas, pendientes, rechazadas o privadas) viven únicamente
-  // en el perfil de quien las creó, hasta que las sugiera y se acepten.
+  // El inicio combina dos zonas: una vitrina curada con líneas destacadas
+  // y un buscador general para encontrar cualquier línea pública.
   _homeTimelinesRaw=timelines.filter(tl=>!tl.privada && tl.estadoDestacada==='aprobada');
+  _homeSearchTimelinesRaw=timelines.filter(tl=>!tl.privada);
 
   // ¿Hay al menos una línea de tiempo que el usuario actual puede borrar?
   // Si no hay ninguna, no tiene sentido mostrarle el botón "Seleccionar".
@@ -1133,90 +1472,105 @@ async function renderHome(){
     setSortBy:v=>{homeSortBy=v;},
     getQuery:()=>homeSearchQuery,
     setQuery:v=>{homeSearchQuery=v;},
-    onChange:renderHomeCards
+    onChange:renderHomeSearchResults
   });
 
   renderHomeCards();
+  renderHomeSearchResults();
 }
 
-// Dibuja las tarjetas del inicio a partir de _homeTimelinesRaw, aplicando
-// la búsqueda y el orden vigentes. Se llama tanto al cargar la pantalla
-// como cada vez que cambia el texto buscado o el botón de orden.
+function appendHomeTimelineCard(grid,tl,i,{allowBulkSelection=true}={}){
+  const wrap=document.createElement('div');
+  wrap.className='timeline-card-wrap';
+  wrap.style.animationDelay=(i*0.07)+'s';
+
+  const card=document.createElement('div');
+  card.className='timeline-card';
+  card.style.setProperty('--card-accent',tl.color||'#E8845A');
+  const count=(tl.eventos||[]).length;
+  const esPropia=currentUser&&tl.ownerId===currentUser.uid;
+  const ownerLabel=tl.ownerName?`<span class="card-owner card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">por ${escHtml(tl.ownerName)}</span>`:'';
+  const propiaLabel=esPropia?`<span class="card-owner card-owner--propia card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">✎ Tuya</span>`:ownerLabel;
+  const puedeBorrar=canEdit(tl);
+  const puedeSeleccionar=allowBulkSelection && modoSeleccion && puedeBorrar;
+  const checkboxHtml = puedeSeleccionar
+    ? `<label class="card-checkbox">
+         <input type="checkbox" class="card-checkbox-input" data-id="${tl.id}" ${idsSeleccionados.has(tl.id)?'checked':''}/>
+       </label>`
+    : '';
+  const bgImageHtml=tl.imagenUrl?`<div class="card-bg-image" style="background-image:url('${escHtml(tl.imagenUrl)}')"></div>`:'';
+  card.innerHTML=`
+    ${bgImageHtml}
+    ${checkboxHtml}
+    <div class="card-main-content">
+      <span class="card-icon">◉</span>
+      <div class="card-name">${escHtml(tl.nombre)}</div>
+    </div>`;
+
+  if(puedeSeleccionar){
+    const checkboxInput=card.querySelector('.card-checkbox-input');
+    checkboxInput.addEventListener('click',e=>e.stopPropagation());
+    checkboxInput.addEventListener('change',()=>alternarSeleccion(tl.id));
+    card.classList.add('seleccionable');
+    card.addEventListener('click',()=>alternarSeleccion(tl.id));
+  } else {
+    card.addEventListener('click',()=>openTimeline(tl.id));
+  }
+  if(!puedeSeleccionar) wrap.appendChild(buildLikeButton(tl));
+  wrap.appendChild(card);
+  wrap.appendChild(buildTimelineCardInfo(tl,count,propiaLabel));
+  const ownerLink=wrap.querySelector('.card-owner-link');
+  if(ownerLink && tl.ownerId){
+    ownerLink.addEventListener('click',e=>{
+      e.stopPropagation();
+      renderPerfil(tl.ownerId);
+    });
+  }
+  grid.appendChild(wrap);
+}
+
+// Dibuja las tarjetas destacadas del inicio. El buscador general no afecta
+// esta vitrina: siempre muestra las aprobadas por el administrador.
 function renderHomeCards(){
   const grid=document.getElementById('timelines-grid');
   const empty=document.getElementById('empty-state');
   grid.innerHTML='';
   grid.appendChild(empty);
 
-  const otras=filtrarYOrdenarTimelines(_homeTimelinesRaw, homeSearchQuery, homeSortBy);
+  const destacadas=filtrarYOrdenarTimelines(_homeTimelinesRaw, '', 'recent');
 
-  if(_homeTimelinesRaw.length===0){
+  if(destacadas.length===0){
     empty.style.display='block';
     empty.querySelector('p').innerHTML='Aún no hay líneas de tiempo destacadas.<br/>Crea la tuya y sugiérela desde tu perfil.';
-  } else if(otras.length===0){
-    empty.style.display='block';
-    empty.querySelector('p').innerHTML='No encontramos líneas de tiempo con ese nombre.';
   } else {
     empty.style.display='none';
-    otras.forEach((tl,i)=>{
-      const wrap=document.createElement('div');
-      wrap.className='timeline-card-wrap';
-      wrap.style.animationDelay=(i*0.07)+'s';
-
-      const card=document.createElement('div');
-      card.className='timeline-card';
-      card.style.setProperty('--card-accent',tl.color||'#E8845A');
-      const count=(tl.eventos||[]).length;
-      const esPropia=currentUser&&tl.ownerId===currentUser.uid;
-      const ownerLabel=tl.ownerName?`<span class="card-owner card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">por ${escHtml(tl.ownerName)}</span>`:'';
-      const propiaLabel=esPropia?`<span class="card-owner card-owner--propia card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">✎ Tuya</span>`:ownerLabel;
-      const puedeBorrar=canEdit(tl);
-      // El checkbox solo se dibuja si estamos en modo selección Y el
-      // usuario tiene permiso de borrar esta línea de tiempo en particular.
-      const checkboxHtml = (modoSeleccion && puedeBorrar)
-        ? `<label class="card-checkbox">
-             <input type="checkbox" class="card-checkbox-input" data-id="${tl.id}" ${idsSeleccionados.has(tl.id)?'checked':''}/>
-           </label>`
-        : '';
-      const bgImageHtml=tl.imagenUrl?`<div class="card-bg-image" style="background-image:url('${escHtml(tl.imagenUrl)}')"></div>`:'';
-      card.innerHTML=`
-        ${bgImageHtml}
-        ${checkboxHtml}
-        <span class="card-icon">◉</span>
-        <div class="card-name">${escHtml(tl.nombre)}</div>
-        <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
-        <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>
-        ${propiaLabel}`;
-
-      if(modoSeleccion && puedeBorrar){
-        // El checkbox necesita "detener" el clic para que no le llegue
-        // también a la tarjeta completa (evita marcar/desmarcar doble).
-        const checkboxInput=card.querySelector('.card-checkbox-input');
-        checkboxInput.addEventListener('click',e=>e.stopPropagation());
-        checkboxInput.addEventListener('change',()=>alternarSeleccion(tl.id));
-
-        // En modo selección, el clic en la tarjeta marca/desmarca en
-        // vez de abrir la línea de tiempo.
-        card.classList.add('seleccionable');
-        card.addEventListener('click',()=>alternarSeleccion(tl.id));
-      } else {
-        card.addEventListener('click',()=>openTimeline(tl.id));
-      }
-      const ownerLink=card.querySelector('.card-owner-link');
-      if(ownerLink && tl.ownerId){
-        ownerLink.addEventListener('click',e=>{
-          e.stopPropagation();
-          renderPerfil(tl.ownerId);
-        });
-      }
-      wrap.appendChild(card);
-      // El modo selección (para borrar en lote) es solo para tarjetas
-      // propias; ocultamos el botón de "me gusta" mientras tanto para
-      // no estorbar el flujo de selección.
-      if(!(modoSeleccion && puedeBorrar)) wrap.appendChild(buildLikeRow(tl));
-      grid.appendChild(wrap);
-    });
+    destacadas.forEach((tl,i)=>appendHomeTimelineCard(grid,tl,i,{allowBulkSelection:true}));
   }
+}
+
+function renderHomeSearchResults(){
+  const grid=document.getElementById('home-search-results-grid');
+  const empty=document.getElementById('home-search-empty');
+  if(!grid||!empty) return;
+  grid.innerHTML='';
+  grid.appendChild(empty);
+
+  const q=(homeSearchQuery||'').trim();
+  if(!q){
+    empty.style.display='block';
+    empty.querySelector('p').innerHTML='Escribe para buscar entre todas las líneas de tiempo públicas.';
+    return;
+  }
+
+  const resultados=filtrarYOrdenarTimelines(_homeSearchTimelinesRaw, homeSearchQuery, homeSortBy);
+  if(resultados.length===0){
+    empty.style.display='block';
+    empty.querySelector('p').innerHTML='No encontramos líneas de tiempo públicas con esa búsqueda.';
+    return;
+  }
+
+  empty.style.display='none';
+  resultados.forEach((tl,i)=>appendHomeTimelineCard(grid,tl,i,{allowBulkSelection:false}));
 }
 
 // ─── PERFIL / MURO DE USUARIO ──────────────────────────────
@@ -1225,11 +1579,12 @@ function renderHomeCards(){
 // como "privada" solo se muestran si quien mira es el propio dueño
 // (o root). Se accede desde "Mi perfil" en el header, o haciendo
 // clic en el nombre del dueño dentro de cualquier tarjeta.
-async function renderPerfil(uid){
+async function renderPerfil(uid,options={}){
   if(!uid) return;
+  if(!options.skipRouteUpdate) setRoute({perfil:uid});
   // Si cambiamos de perfil (otro usuario), reseteamos la búsqueda/orden
   // para no arrastrar un filtro que no tiene sentido en el nuevo muro.
-  if(viewingProfileUid!==uid){
+  if(viewingProfileUid!==uid || options.forceLineas){
     perfilSearchQuery='';
     perfilSortBy='recent';
     perfilViewMode='lineas';
@@ -1428,13 +1783,14 @@ function renderPerfilCards(emptyBaseMsg){
       card.innerHTML=`
         ${bgImageHtml}
         ${privadaBadge}
-        <span class="card-icon">◉</span>
-        <div class="card-name">${escHtml(tl.nombre)}</div>
-        <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
-        <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>`;
+        <div class="card-main-content">
+      <span class="card-icon">◉</span>
+      <div class="card-name">${escHtml(tl.nombre)}</div>
+    </div>`;
       card.addEventListener('click',()=>openTimeline(tl.id));
+      wrap.appendChild(buildLikeButton(tl));
       wrap.appendChild(card);
-      wrap.appendChild(buildLikeRow(tl));
+      wrap.appendChild(buildTimelineCardInfo(tl,count));
 
       const activityRow=buildActividadRow(tl);
       if(activityRow) wrap.appendChild(activityRow);
@@ -1757,6 +2113,7 @@ async function openTimeline(id){
   }
 
   activeTimelineId=id;
+  activeTimelineSectionFilter='';
   const puedeEditar=canEdit(tl);
 
   document.documentElement.style.setProperty('--accent',tl.color||'#E8845A');
@@ -1769,12 +2126,18 @@ async function openTimeline(id){
     if(!puedeEditar&&tl.ownerName){
       ownerEl.textContent=`por ${tl.ownerName}`;
       ownerEl.classList.remove('hidden');
+      renderOwnerSocialLinks(tl);
       if(tl.ownerId){
         ownerEl.classList.add('editor-owner--link');
         ownerEl.onclick=()=>renderPerfil(tl.ownerId);
       }
     }
-    else { ownerEl.classList.add('hidden'); ownerEl.classList.remove('editor-owner--link'); ownerEl.onclick=null; }
+    else {
+      ownerEl.classList.add('hidden');
+      ownerEl.classList.remove('editor-owner--link');
+      ownerEl.onclick=null;
+      renderOwnerSocialLinks(null);
+    }
   }
 
   const btnAdd=document.getElementById('btn-add-event');
@@ -1805,12 +2168,20 @@ function renderTimelineFromCache(tl){
   const line=document.getElementById('timeline-line');
   container.innerHTML='';
 
-  const eventos=ordenarEventos(tl.eventos||[]);
+  const allEventos=ordenarEventos(tl.eventos||[]);
+  const eventos=getFilteredTimelineEvents(tl);
   const lecturas=normalizeTimelineNotes(tl.lecturas||[]);
+  renderTimelineSectionFilters(tl);
   renderTimelineNotesPanel(tl);
   renderRelatedTimelinesPanel(tl);
 
   if(eventos.length===0){
+    const emptyText=empty.querySelector('p');
+    if(emptyText){
+      emptyText.innerHTML=allEventos.length&&activeTimelineSectionFilter
+        ? 'No hay eventos en esta sección.'
+        : 'Agrega tu primer evento con el botón <strong>"+ Evento"</strong>';
+    }
     empty.style.display='flex';
     line.style.display='none';
   } else {
@@ -1832,11 +2203,15 @@ function renderTimelineFromCache(tl){
       const yearHtml=getYearLabel(ev.fecha)?`<div class="event-year">${getYearLabel(ev.fecha)}</div>`:'';
       const subCount=(ev.subEventos||[]).length;
       const subHtml=subCount?`<div class="event-subtimeline-pill">${subCount} hito${subCount===1?'':'s'} relacionados</div>`:'';
+      const verifyHtml=getVerifyStatusHtml(ev);
+      const sectionHtml=getEventSectionHtml(ev,tl);
       item.innerHTML=`
         <div class="event-spacer"></div>
         ${yearHtml}
         <div class="event-card">
           ${imgHtml}
+          ${verifyHtml}
+          ${sectionHtml}
           <div class="event-titulo">${escHtml(ev.titulo)}</div>
           ${descHtml}
           ${subHtml}
@@ -1858,10 +2233,13 @@ async function openModalEditarTimeline(){
   document.getElementById('edit-tl-nombre').value=tl.nombre||'';
   document.getElementById('edit-tl-desc').value=tl.desc||'';
   document.getElementById('edit-tl-privada').checked=!!tl.privada;
+  setSocialInputs('edit',tl.ownerSocials||{});
+  setEditSocialEnabled(hasSocialLinks(tl.ownerSocials||{}));
   selectEditColor(tl.color||'#E8845A');
   editTlImagenUrl=tl.imagenUrl||null;
   editTlImagenSubiendo=false;
   renderEditTlImagen();
+  resetTimelineSectionsEditor(tl.secciones||[]);
   resetTimelineNotesEditor(tl.lecturas||[],ordenarEventos(tl.eventos||[]));
   try {
     const timelines=await fetchTimelines();
@@ -1881,11 +2259,18 @@ async function guardarEdicionTimeline(){
   const privada=document.getElementById('edit-tl-privada').checked;
   const color=selectedEditColor;
   const lecturas=getTimelineNotesFromEditor();
+  const secciones=getTimelineSectionsFromEditor();
+  const validSectionIds=new Set(secciones.map(section=>section.id));
+  const eventos=((_timelineCache[activeTimelineId]&&_timelineCache[activeTimelineId].eventos)||[]).map(ev=>
+    !ev.seccionId||validSectionIds.has(ev.seccionId)?ev:{...ev,seccionId:''}
+  );
   const relatedTimelineIds=normalizeRelatedTimelineIds(getRelatedTimelineIdsFromEditor());
   const imagenUrl=editTlImagenUrl||null;
+  const socialEnabled=document.getElementById('edit-social-enabled').checked;
+  const ownerSocials=socialEnabled?getSocialsFromInputs('edit'):{};
   const tl=_timelineCache[activeTimelineId];
   const actualizadoEn=Date.now();
-  _timelineCache[activeTimelineId]={...tl,nombre,desc,privada,color,lecturas,relatedTimelineIds,imagenUrl,actualizadoEn};
+  _timelineCache[activeTimelineId]={...tl,nombre,desc,privada,color,lecturas,secciones,eventos,relatedTimelineIds,imagenUrl,ownerSocials,actualizadoEn};
   document.getElementById('editor-title').textContent=nombre;
   document.getElementById('editor-desc').textContent=desc;
   document.documentElement.style.setProperty('--accent',color);
@@ -1894,7 +2279,7 @@ async function guardarEdicionTimeline(){
   hideModal('modal-editar-tl');
   toast('Línea de tiempo actualizada ✓');
   try {
-    await updateTimeline(activeTimelineId,{nombre,desc,privada,color,lecturas,relatedTimelineIds,imagenUrl,actualizadoEn});
+    await updateTimeline(activeTimelineId,{nombre,desc,privada,color,lecturas,secciones,eventos,relatedTimelineIds,imagenUrl,ownerSocials,actualizadoEn});
   } catch(e){
     _timelineCache[activeTimelineId]=tl;
     document.getElementById('editor-title').textContent=tl.nombre;
@@ -1937,6 +2322,7 @@ function openModalEvento(eventId=null){
   activeUploadsCount=0;
   renderImageGalleryEditor();
   resetSubtimelineEditor();
+  renderEventSectionSelect(tl,'');
 
   const titulo=document.getElementById('modal-evento-titulo');
   const btnElim=document.getElementById('btn-eliminar-evento');
@@ -1945,18 +2331,21 @@ function openModalEvento(eventId=null){
     const ev=(tl.eventos||[]).find(e=>e.id===eventId);
     if(ev){
       titulo.textContent='Editar evento';
+      document.getElementById('ev-info-confirmada').checked=!!ev.infoConfirmada;
       document.getElementById('ev-titulo').value=ev.titulo||'';
       document.getElementById('ev-fecha').value=ev.fecha||'';
       document.getElementById('ev-descripcion').value=ev.descripcion||'';
       pendingImages=getEventImages(ev);
       renderImageGalleryEditor();
       resetSubtimelineEditor(ev.subEventos||[]);
+      renderEventSectionSelect(tl,ev.seccionId||'');
       btnElim.classList.remove('hidden');
       showModal('modal-evento');
       rememberEventDraft();
     }
   } else {
     titulo.textContent='Nuevo evento';
+    document.getElementById('ev-info-confirmada').checked=false;
     document.getElementById('ev-titulo').value='';
     document.getElementById('ev-fecha').value='';
     document.getElementById('ev-descripcion').value='';
@@ -1982,15 +2371,17 @@ async function guardarEvento(){
   try {
     const tl=await getTimeline(activeTimelineId);
     const eventos=[...(tl.eventos||[])];
+    const infoConfirmada=document.getElementById('ev-info-confirmada').checked;
     const fechaVal=document.getElementById('ev-fecha').value.trim();
     const descVal=document.getElementById('ev-descripcion').value.trim();
+    const seccionId=document.getElementById('ev-seccion').value||'';
     const subEventos=ordenarSubEventos(getSubtimelineFromEditor());
 
     if(editingEventId){
       const idx=eventos.findIndex(e=>e.id===editingEventId);
-      if(idx>-1) eventos[idx]={...eventos[idx],titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagenes:[...pendingImages],imagen:null,subEventos};
+      if(idx>-1) eventos[idx]={...eventos[idx],infoConfirmada,seccionId,titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagenes:[...pendingImages],imagen:null,subEventos};
     } else {
-      eventos.push({id:uid(),titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagenes:[...pendingImages],subEventos,creadoEn:Date.now()});
+      eventos.push({id:uid(),infoConfirmada,seccionId,titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagenes:[...pendingImages],subEventos,creadoEn:Date.now()});
     }
 
     const eventosOrdenados=ordenarEventos(eventos);
@@ -2038,6 +2429,8 @@ function verEventoFromCache(eventId,tl){
   const ev=(tl.eventos||[]).find(e=>e.id===eventId);
   if(!ev) return;
   document.getElementById('ver-fecha').textContent=ev.fecha||'';
+  renderVerifyStatus('ver-confirmacion',ev);
+  renderEventSectionView(ev,tl);
   document.getElementById('ver-titulo').textContent=ev.titulo;
   document.getElementById('ver-descripcion').textContent=ev.descripcion||'';
   renderVerImagenes(getEventImages(ev));
@@ -2130,7 +2523,7 @@ async function crearTimeline(){
   btnCrear.textContent='Creando...';
 
   try {
-    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor,imagenUrl:pendingTlImagenUrl||null,privada});
+    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor,imagenUrl:pendingTlImagenUrl||null,privada,ownerSocials:{}});
     hideModal('modal-nueva');
     await openTimeline(ref.id);
     toast('Línea de tiempo creada ✓');
@@ -2328,6 +2721,12 @@ onAuthStateChanged(auth, async user=>{
   if(isRoot) refreshSolicitudesBadge();
   else document.getElementById('solicitudes-badge').classList.add('hidden');
 
+  if(!initialRouteHandled){
+    initialRouteHandled=true;
+    await openRouteFromUrl();
+    return;
+  }
+
   if(user){
     const screenAuth=document.getElementById('screen-auth');
     if(!screenAuth.classList.contains('hidden')){
@@ -2348,6 +2747,7 @@ onAuthStateChanged(auth, async user=>{
 
 // ─── INIT ─────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded',()=>{
+  window.addEventListener('popstate',()=>openRouteFromUrl());
 
   document.getElementById('btn-acceder').addEventListener('click',showAuth);
   document.getElementById('btn-nueva').addEventListener('click',openModalNueva);
@@ -2358,6 +2758,7 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
   document.getElementById('btn-perfil-back').addEventListener('click',renderHome);
   document.getElementById('btn-nueva-perfil').addEventListener('click',openModalNueva);
+  document.getElementById('btn-copy-perfil-link').addEventListener('click',copyCurrentProfileLink);
   document.getElementById('btn-toggle-perfil-stats').addEventListener('click',()=>{
     perfilViewMode = perfilViewMode==='stats' ? 'lineas' : 'stats';
     applyPerfilViewMode();
@@ -2394,6 +2795,8 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('modal-close-editar-tl').addEventListener('click',()=>hideModal('modal-editar-tl'));
   document.getElementById('btn-edit-tl').addEventListener('click',openModalEditarTimeline);
   document.getElementById('btn-editar-tl-confirmar').addEventListener('click',guardarEdicionTimeline);
+  document.getElementById('btn-add-timeline-section').addEventListener('click',()=>addTimelineSectionRow());
+  document.getElementById('edit-social-enabled').addEventListener('change',e=>setEditSocialEnabled(e.target.checked));
   document.getElementById('btn-add-timeline-note').addEventListener('click',()=>{
     const tl=_timelineCache[activeTimelineId];
     addTimelineNoteRow({},ordenarEventos((tl&&tl.eventos)||[]));
@@ -2509,5 +2912,6 @@ document.addEventListener('DOMContentLoaded',()=>{
     }
   });
 
-  renderHome();
+  initialRouteHandled=true;
+  openRouteFromUrl();
 });

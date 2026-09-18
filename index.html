@@ -6,7 +6,7 @@
   <title>Línea de Tiempo</title>
   <link rel="stylesheet" href="style.css"/>
   <link rel="icon" type="image/png" href="linea-tiempo.png" sizes="any">
-  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
 </head>
 <body>
 
@@ -50,10 +50,21 @@
             <button class="btn-mini hidden" id="btn-cancelar-seleccion">Cancelar</button>
           </div>
         </div>
+        <div id="timelines-grid" class="timelines-grid">
+          <div class="empty-state" id="empty-state">
+            <div class="empty-icon">◎</div>
+            <p>Aún no hay líneas de tiempo destacadas.<br/>Crea la tuya y sugiérela desde tu perfil.</p>
+          </div>
+        </div>
+      </section>
+      <section class="timelines-section search-timelines-section">
+        <div class="timelines-section-header">
+          <h2 class="section-title">Buscar líneas de tiempo</h2>
+        </div>
         <div class="timelines-toolbar">
-          <div class="search-box">
+          <div class="search-box search-box-wide">
             <span class="search-icon">⌕</span>
-            <input type="text" id="home-search" class="search-input" placeholder="Buscar por nombre..." autocomplete="off"/>
+            <input type="text" id="home-search" class="search-input" placeholder="Buscar por nombre, persona o descripción..." autocomplete="off"/>
           </div>
           <div class="sort-dropdown" id="home-sort-dropdown">
             <button type="button" class="btn-sort-toggle" id="home-sort-toggle">
@@ -68,19 +79,28 @@
             </div>
           </div>
         </div>
-        <div id="timelines-grid" class="timelines-grid">
-          <div class="empty-state" id="empty-state">
-            <div class="empty-icon">◎</div>
-            <p>Aún no hay líneas de tiempo destacadas.<br/>Crea la tuya y sugiérela desde tu perfil.</p>
+        <div id="home-search-results-grid" class="timelines-grid">
+          <div class="empty-state" id="home-search-empty">
+            <div class="empty-icon">⌕</div>
+            <p>Escribe para buscar entre todas las líneas de tiempo públicas.</p>
           </div>
         </div>
       </section>
     </main>
     <footer id="nota-deploy-root" class="nota-deploy-root hidden">
-      Este proyecto tiene su propio Firebase (<code>linea-tiempo-d4a50</code>), independiente de otros proyectos.
-      Para publicar cambios: <code>firebase deploy --only hosting,firestore</code> (sin build, es HTML/CSS/JS puro).
+      Esta página está hecha con tecnologías simples: <strong>HTML</strong> para la estructura,
+      <strong>CSS</strong> para el diseño y <strong>JavaScript</strong> para que todo funcione.
+      No usa framework ni build: se publica tal cual en <strong>Firebase Hosting</strong>, dentro del proyecto
+      <code>linea-tiempo-16fa4</code>.
       <br/>
-      Las imágenes de los eventos se guardan con Cloudinary (cuenta compartida con Kokoro), no en Firestore.
+      Los usuarios, inicios de sesión y datos de las líneas de tiempo se manejan con <strong>Firebase</strong>:
+      <strong>Auth</strong> permite entrar con Google, correo o teléfono, y <strong>Firestore</strong> guarda los textos,
+      fechas, eventos y configuraciones. Las imágenes se suben a <strong>Cloudinary</strong> y Firestore guarda solo sus links,
+      para que la base de datos no se llene con archivos pesados.
+      <br/>
+      Para publicar cambios: <code>firebase deploy --only hosting,firestore</code>.
+      <br/>
+      Fuente usada en la página: <strong>Nunito Sans</strong>, cargada desde Google Fonts.
     </footer>
   </div>
 
@@ -177,7 +197,10 @@
           <h2 id="perfil-nombre" class="perfil-nombre"></h2>
           <p id="perfil-count" class="perfil-count"></p>
         </div>
-        <button class="btn-secondary sm perfil-stats-toggle" id="btn-toggle-perfil-stats">📊 Estadísticas del perfil</button>
+        <div class="perfil-actions">
+          <button class="btn-secondary sm" id="btn-copy-perfil-link">Copiar enlace</button>
+          <button class="btn-secondary sm perfil-stats-toggle" id="btn-toggle-perfil-stats">📊 Estadísticas del perfil</button>
+        </div>
       </div>
       <section class="timelines-section" id="perfil-lineas-section">
         <div class="timelines-section-header">
@@ -314,6 +337,29 @@
         <div class="img-gallery-editor" id="edit-tl-imagen-editor"></div>
       </div>
       <div class="form-group">
+        <label class="toggle-row">
+          <input type="checkbox" id="edit-social-enabled"/>
+          <span>Mostrar redes sociales públicas en esta línea <span class="opcional">(opcional)</span></span>
+        </label>
+        <div class="social-links-editor hidden" id="edit-social-fields">
+          <input type="text" id="edit-social-instagram" placeholder="Instagram: usuario o link"/>
+          <input type="text" id="edit-social-facebook" placeholder="Facebook: usuario o link"/>
+          <input type="text" id="edit-social-youtube" placeholder="YouTube: canal, @usuario o link"/>
+          <input type="text" id="edit-social-kick" placeholder="Kick: usuario o link"/>
+          <input type="text" id="edit-social-tiktok" placeholder="TikTok: usuario o link"/>
+        </div>
+        <p class="form-help">Actívalas desde esta configuración cuando quieras mostrarlas debajo del nombre del creador.</p>
+      </div>
+      <div class="form-group">
+        <div class="timeline-sections-edit-header">
+          <label>Secciones <span class="opcional">(opcional)</span></label>
+          <button type="button" class="btn-mini" id="btn-add-timeline-section">+ Sección</button>
+        </div>
+        <div class="timeline-sections-editor" id="timeline-sections-editor"></div>
+        <p class="form-help">Ej: Toei Animation, Hanna-Barbera, Cartoon Network. Luego podrás asignar eventos a una de estas secciones.</p>
+      </div>
+
+      <div class="form-group">
         <div class="timeline-notes-edit-header">
           <label>Descripciones de lectura <span class="opcional">(opcional)</span></label>
           <button type="button" class="btn-mini" id="btn-add-timeline-note">+ Descripción</button>
@@ -343,6 +389,7 @@
         <span class="editor-desc" id="editor-desc"></span>
         <!-- Muestra el nombre del dueño si no es el usuario actual -->
         <span class="editor-owner hidden" id="editor-owner"></span>
+        <div class="editor-social-links hidden" id="editor-social-links"></div>
       </div>
       <div class="editor-header-actions">
         <button class="btn-danger-sm hidden" id="btn-delete-tl" title="Eliminar línea de tiempo">🗑 Eliminar</button>
@@ -357,6 +404,7 @@
         <span class="zoom-label" id="zoom-label">100%</span>
         <button class="zoom-btn" id="btn-zoom-in" title="Acercar">+</button>
         <button class="zoom-reset" id="btn-zoom-reset">Reset</button>
+        <div class="timeline-section-filters hidden" id="timeline-section-filters"></div>
         <span class="zoom-hint">Ctrl + scroll para zoom · Arrastra para mover</span>
       </div>
 
@@ -388,12 +436,25 @@
       <button class="modal-close" id="modal-close-evento">✕</button>
       <h2 id="modal-evento-titulo">Nuevo evento</h2>
       <div class="form-group">
+        <label class="verify-row">
+          <input type="checkbox" id="ev-info-confirmada"/>
+          <span>
+            Información confirmada
+            <small>Marca esta casilla cuando la fecha y los datos del evento ya estén verificados.</small>
+          </span>
+        </label>
+      </div>
+      <div class="form-group">
         <label>Título del evento *</label>
         <input type="text" id="ev-titulo" placeholder="Ej: Primer trabajo"/>
       </div>
       <div class="form-group">
         <label>Fecha</label>
         <input type="text" id="ev-fecha" placeholder="Ej: Enero 2020 o 15/03/2021"/>
+      </div>
+      <div class="form-group">
+        <label>Sección <span class="opcional">(opcional)</span></label>
+        <select id="ev-seccion"></select>
       </div>
       <div class="form-group">
         <label>Descripción</label>
@@ -428,6 +489,8 @@
     <div class="modal modal-ver">
       <button class="modal-close" id="modal-close-ver">✕</button>
       <div class="ver-fecha" id="ver-fecha"></div>
+      <div class="event-verify-status hidden" id="ver-confirmacion"></div>
+      <div class="event-section-pill hidden" id="ver-seccion"></div>
       <h2 id="ver-titulo"></h2>
       <div id="ver-imagenes" class="ver-imagenes hidden"></div>
       <p id="ver-descripcion" class="ver-desc"></p>
