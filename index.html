@@ -31,7 +31,7 @@
         <p class="hero-sub">NUESTRA HISTORIA EN LINEAS DE TIEMPO<br/>TODAS EN UN SOLO LUGAR.</p>
         <p class="hero-sub-note">Estas son las líneas de tiempo que el administrador ha destacado. Cada usuario tiene su propio perfil con todas las que ha creado, y puede sugerir que alguna aparezca aquí.</p>
         <button class="btn-primary hidden" id="btn-nueva">
-          <span class="btn-icon">+</span> Nueva línea de tiempo
+          <span class="btn-icon">+</span> Crear línea de tiempo
         </button>
       </div>
 <section class="timelines-section">
@@ -64,7 +64,7 @@
         <div class="timelines-toolbar">
           <div class="search-box search-box-wide">
             <span class="search-icon">⌕</span>
-            <input type="text" id="home-search" class="search-input" placeholder="Buscar por nombre, persona o descripción..." autocomplete="off"/>
+            <input type="text" id="home-search" class="search-input" placeholder="Buscar por nombre, persona, descripción o #hashtag..." autocomplete="off"/>
           </div>
           <div class="sort-dropdown" id="home-sort-dropdown">
             <button type="button" class="btn-sort-toggle" id="home-sort-toggle">
@@ -198,6 +198,7 @@
           <p id="perfil-count" class="perfil-count"></p>
         </div>
         <div class="perfil-actions">
+          <button class="btn-secondary sm hidden" id="btn-perfil-config">⚙ Configuración</button>
           <button class="btn-secondary sm" id="btn-copy-perfil-link">Copiar enlace</button>
           <button class="btn-secondary sm perfil-stats-toggle" id="btn-toggle-perfil-stats">📊 Estadísticas del perfil</button>
         </div>
@@ -206,13 +207,13 @@
         <div class="timelines-section-header">
           <h2 class="section-title" id="perfil-grid-title">Líneas de tiempo</h2>
           <button class="btn-primary sm hidden" id="btn-nueva-perfil">
-            <span class="btn-icon">+</span> Nueva línea de tiempo
+            <span class="btn-icon">+</span> Crear línea de tiempo
           </button>
         </div>
         <div class="timelines-toolbar">
           <div class="search-box">
             <span class="search-icon">⌕</span>
-            <input type="text" id="perfil-search" class="search-input" placeholder="Buscar por nombre..." autocomplete="off"/>
+            <input type="text" id="perfil-search" class="search-input" placeholder="Buscar por nombre o #hashtag..." autocomplete="off"/>
           </div>
           <div class="sort-dropdown" id="perfil-sort-dropdown">
             <button type="button" class="btn-sort-toggle" id="perfil-sort-toggle">
@@ -268,6 +269,29 @@
     </main>
   </div>
 
+  <!-- ====== MODAL: CONFIGURACIÓN DEL PERFIL ====== -->
+  <div id="modal-perfil-config" class="modal-overlay hidden">
+    <div class="modal">
+      <button class="modal-close" id="modal-close-perfil-config">✕</button>
+      <h2>Configuración del perfil</h2>
+      <div class="form-group">
+        <label class="toggle-row">
+          <input type="checkbox" id="perfil-social-enabled"/>
+          <span>Mostrar mis redes sociales públicas <span class="opcional">(opcional)</span></span>
+        </label>
+        <div class="social-links-editor hidden" id="perfil-social-fields">
+          <input type="text" id="perfil-social-instagram" placeholder="Instagram: usuario o link"/>
+          <input type="text" id="perfil-social-facebook" placeholder="Facebook: usuario o link"/>
+          <input type="text" id="perfil-social-youtube" placeholder="YouTube: canal, @usuario o link"/>
+          <input type="text" id="perfil-social-kick" placeholder="Kick: usuario o link"/>
+          <input type="text" id="perfil-social-tiktok" placeholder="TikTok: usuario o link"/>
+        </div>
+        <p class="form-help">Si las activas, se mostrarán debajo de tu nombre en todas tus líneas de tiempo.</p>
+      </div>
+      <button class="btn-primary full" id="btn-perfil-config-guardar">Guardar cambios</button>
+    </div>
+  </div>
+
   <!-- ====== MODAL: NUEVA LÍNEA DE TIEMPO ====== -->
   <div id="modal-nueva" class="modal-overlay hidden">
     <div class="modal">
@@ -293,7 +317,18 @@
         </div>
       </div>
       <div class="form-group">
-        <label>Imagen de fondo <span class="opcional">(opcional)</span></label>
+        <label>Diseño de fondo</label>
+        <div class="fondo-picker" id="fondo-picker-nueva" data-scope="nueva">
+          <button type="button" class="fondo-option" data-fondo="liso" title="Liso"><span class="fondo-preview" data-fondo="liso"></span><small>Liso</small></button>
+          <button type="button" class="fondo-option" data-fondo="cuadricula" title="Cuadrícula"><span class="fondo-preview" data-fondo="cuadricula"></span><small>Cuadrícula</small></button>
+          <button type="button" class="fondo-option" data-fondo="puntos" title="Puntos"><span class="fondo-preview" data-fondo="puntos"></span><small>Puntos</small></button>
+          <button type="button" class="fondo-option" data-fondo="lineas" title="Líneas"><span class="fondo-preview" data-fondo="lineas"></span><small>Líneas</small></button>
+          <button type="button" class="fondo-option" data-fondo="degradado" title="Degradado"><span class="fondo-preview" data-fondo="degradado"></span><small>Degradado</small></button>
+          <button type="button" class="fondo-option" data-fondo="resplandor" title="Resplandor"><span class="fondo-preview" data-fondo="resplandor"></span><small>Resplandor</small></button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Imagen de la miniatura <span class="opcional">(opcional)</span></label>
         <input type="file" id="input-tl-imagen" accept="image/*" hidden/>
         <div class="img-gallery-editor" id="tl-imagen-editor"></div>
       </div>
@@ -332,23 +367,20 @@
         </div>
       </div>
       <div class="form-group">
-        <label>Imagen de fondo <span class="opcional">(opcional)</span></label>
-        <input type="file" id="edit-tl-imagen" accept="image/*" hidden/>
-        <div class="img-gallery-editor" id="edit-tl-imagen-editor"></div>
+        <label>Diseño de fondo</label>
+        <div class="fondo-picker" id="fondo-picker-editar" data-scope="editar">
+          <button type="button" class="fondo-option" data-fondo="liso" title="Liso"><span class="fondo-preview" data-fondo="liso"></span><small>Liso</small></button>
+          <button type="button" class="fondo-option" data-fondo="cuadricula" title="Cuadrícula"><span class="fondo-preview" data-fondo="cuadricula"></span><small>Cuadrícula</small></button>
+          <button type="button" class="fondo-option" data-fondo="puntos" title="Puntos"><span class="fondo-preview" data-fondo="puntos"></span><small>Puntos</small></button>
+          <button type="button" class="fondo-option" data-fondo="lineas" title="Líneas"><span class="fondo-preview" data-fondo="lineas"></span><small>Líneas</small></button>
+          <button type="button" class="fondo-option" data-fondo="degradado" title="Degradado"><span class="fondo-preview" data-fondo="degradado"></span><small>Degradado</small></button>
+          <button type="button" class="fondo-option" data-fondo="resplandor" title="Resplandor"><span class="fondo-preview" data-fondo="resplandor"></span><small>Resplandor</small></button>
+        </div>
       </div>
       <div class="form-group">
-        <label class="toggle-row">
-          <input type="checkbox" id="edit-social-enabled"/>
-          <span>Mostrar redes sociales públicas en esta línea <span class="opcional">(opcional)</span></span>
-        </label>
-        <div class="social-links-editor hidden" id="edit-social-fields">
-          <input type="text" id="edit-social-instagram" placeholder="Instagram: usuario o link"/>
-          <input type="text" id="edit-social-facebook" placeholder="Facebook: usuario o link"/>
-          <input type="text" id="edit-social-youtube" placeholder="YouTube: canal, @usuario o link"/>
-          <input type="text" id="edit-social-kick" placeholder="Kick: usuario o link"/>
-          <input type="text" id="edit-social-tiktok" placeholder="TikTok: usuario o link"/>
-        </div>
-        <p class="form-help">Actívalas desde esta configuración cuando quieras mostrarlas debajo del nombre del creador.</p>
+        <label>Imagen de la miniatura <span class="opcional">(opcional)</span></label>
+        <input type="file" id="edit-tl-imagen" accept="image/*" hidden/>
+        <div class="img-gallery-editor" id="edit-tl-imagen-editor"></div>
       </div>
       <div class="form-group">
         <div class="timeline-sections-edit-header">
@@ -365,6 +397,14 @@
           <button type="button" class="btn-mini" id="btn-add-timeline-note">+ Descripción</button>
         </div>
         <div class="timeline-notes-editor" id="timeline-notes-editor"></div>
+      </div>
+      <div class="form-group">
+        <label>Hashtags <span class="opcional">(opcional)</span></label>
+        <div class="hashtags-box" id="hashtags-box">
+          <span id="hashtags-chips"></span>
+          <input type="text" id="hashtags-input" class="hashtags-input" placeholder="Ej: anime, toei, clásicos" autocomplete="off" maxlength="40"/>
+        </div>
+        <p class="form-help">Escribe una palabra y presiona Enter, espacio o coma para agregarla (máx. 10). Así te encontrarán cuando busquen esa palabra o su #hashtag.</p>
       </div>
       <div class="form-group">
         <label>Lineas relacionadas <span class="opcional">(opcional)</span></label>
@@ -436,15 +476,6 @@
       <button class="modal-close" id="modal-close-evento">✕</button>
       <h2 id="modal-evento-titulo">Nuevo evento</h2>
       <div class="form-group">
-        <label class="verify-row">
-          <input type="checkbox" id="ev-info-confirmada"/>
-          <span>
-            Información confirmada
-            <small>Marca esta casilla cuando la fecha y los datos del evento ya estén verificados.</small>
-          </span>
-        </label>
-      </div>
-      <div class="form-group">
         <label>Título del evento *</label>
         <input type="text" id="ev-titulo" placeholder="Ej: Primer trabajo"/>
       </div>
@@ -459,6 +490,12 @@
       <div class="form-group">
         <label>Descripción</label>
         <textarea id="ev-descripcion" placeholder="Cuenta qué pasó en este momento..." rows="3"></textarea>
+      </div>
+      <div class="form-group">
+        <label class="verify-row" title="Marca esta casilla cuando la fecha y los datos del evento ya estén verificados.">
+          <input type="checkbox" id="ev-info-confirmada"/>
+          <span>Información confirmada</span>
+        </label>
       </div>
       <div class="form-group">
         <label>Imágenes <span class="opcional">(opcional)</span></label>

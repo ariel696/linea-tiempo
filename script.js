@@ -91,6 +91,9 @@ let activeTimelineSectionFilter = '';
 let editingEventId     = null;
 let selectedColor      = "#E8845A";
 let selectedEditColor  = "#E8845A";
+let selectedFondo      = "liso";
+let selectedEditFondo  = "liso";
+let editHashtags       = [];
 let pendingImages       = [];
 let activeUploadsCount  = 0;
 let eventDraftSnapshot = null;
@@ -155,6 +158,37 @@ function uid(){ return Date.now().toString(36) + Math.random().toString(36).slic
 function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function hexToAlpha(hex,a){ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; }
 
+// ─── DISEÑO DE FONDO DE LA LÍNEA DE TIEMPO ────────────────
+// Cada línea guarda su diseño en el campo "fondo". Los estilos de cada
+// uno viven en style.css (bloque "DISEÑO DE FONDO"); aquí solo se elige y
+// se aplica con data-fondo sobre el área de la línea de tiempo.
+const FONDOS=['liso','cuadricula','puntos','lineas','degradado','resplandor'];
+
+function normalizeFondo(v){ return FONDOS.includes(v)?v:'liso'; }
+
+function selectFondo(scope,fondo){
+  fondo=normalizeFondo(fondo);
+  if(scope==='editar') selectedEditFondo=fondo; else selectedFondo=fondo;
+  const picker=document.getElementById(`fondo-picker-${scope}`);
+  if(picker) picker.querySelectorAll('.fondo-option').forEach(btn=>{
+    btn.classList.toggle('selected',btn.dataset.fondo===fondo);
+  });
+}
+
+// Las vistas previas de "Degradado" y "Resplandor" usan el color de acento
+// que la persona tiene elegido en ese momento.
+function setFondoPickerAccent(scope,color){
+  const picker=document.getElementById(`fondo-picker-${scope}`);
+  if(!picker||!color) return;
+  picker.style.setProperty('--fondo-accent',color);
+  picker.style.setProperty('--fondo-glow',hexToAlpha(color,0.18));
+}
+
+function applyTimelineFondo(fondo){
+  const wrapper=document.getElementById('timeline-scroll-wrapper');
+  if(wrapper) wrapper.dataset.fondo=normalizeFondo(fondo);
+}
+
 function toast(msg, dur=3000){
   const t = document.getElementById('toast');
   t.textContent = msg;
@@ -168,6 +202,104 @@ function shake(el){
   el.offsetHeight;
   el.style.animation='shake 0.35s ease';
   setTimeout(()=>el.style.animation='',400);
+}
+
+// ─── HASHTAGS ─────────────────────────────────────────────
+// Cada línea guarda "hashtags": un arreglo de palabras (sin el #). El buscador
+// del inicio y del perfil también las mira, así una línea puede aparecer
+// cuando se busca una palabra relacionada aunque no esté en su nombre.
+const MAX_HASHTAGS=10;
+
+// Minúsculas y sin tildes, para que "películas" y "peliculas" coincidan.
+function normalizeSearchText(str){
+  return String(str||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+
+// Deja solo letras, números y guion bajo (se conservan las tildes).
+function sanitizeHashtag(raw){
+  return String(raw||'').trim().replace(/^#+/,'').toLowerCase().replace(/[^\p{L}\p{N}_]/gu,'').slice(0,30);
+}
+
+function normalizeHashtags(list){
+  const seen=new Set();
+  const out=[];
+  (Array.isArray(list)?list:[]).forEach(raw=>{
+    const tag=sanitizeHashtag(raw);
+    const key=normalizeSearchText(tag);
+    if(!tag||seen.has(key)) return;
+    seen.add(key);
+    out.push(tag);
+  });
+  return out.slice(0,MAX_HASHTAGS);
+}
+
+// Todo el texto por el que se puede encontrar una línea, ya normalizado.
+function timelineSearchText(tl){
+  return normalizeSearchText([tl.nombre||'',tl.desc||'',tl.ownerName||'',...(tl.hashtags||[])].join(' '));
+}
+
+function renderHashtagsEditor(){
+  const chips=document.getElementById('hashtags-chips');
+  const input=document.getElementById('hashtags-input');
+  if(chips) chips.innerHTML=editHashtags.map(tag=>
+    `<button type="button" class="hashtag-chip" data-tag="${escHtml(tag)}" title="Quitar">#${escHtml(tag)} <span>×</span></button>`
+  ).join('');
+  if(input) input.placeholder=editHashtags.length?'Agregar otro...':'Ej: anime, toei, clásicos';
+}
+
+function addHashtagTokens(tokens){
+  for(const token of tokens){
+    const tag=sanitizeHashtag(token);
+    if(!tag) continue;
+    if(editHashtags.some(t=>normalizeSearchText(t)===normalizeSearchText(tag))) continue;
+    if(editHashtags.length>=MAX_HASHTAGS){ toast(`Máximo ${MAX_HASHTAGS} hashtags.`); break; }
+    editHashtags.push(tag);
+  }
+  renderHashtagsEditor();
+}
+
+// Convierte en hashtag lo que quedó escrito en la caja (al presionar Enter,
+// al salir del campo o al guardar la línea).
+function commitHashtagInput(){
+  const input=document.getElementById('hashtags-input');
+  if(!input||!input.value) return;
+  const value=input.value;
+  input.value='';
+  addHashtagTokens(value.split(/[\s,#]+/));
+}
+
+function setupHashtagsEditor(){
+  const box=document.getElementById('hashtags-box');
+  const chips=document.getElementById('hashtags-chips');
+  const input=document.getElementById('hashtags-input');
+  if(!box||!chips||!input) return;
+  box.addEventListener('click',e=>{ if(e.target===box) input.focus(); });
+  chips.addEventListener('click',e=>{
+    const chip=e.target.closest('.hashtag-chip');
+    if(!chip) return;
+    editHashtags=editHashtags.filter(t=>t!==chip.dataset.tag);
+    renderHashtagsEditor();
+    input.focus();
+  });
+  // Un espacio, coma o # cierra la palabra actual (también al pegar varias).
+  input.addEventListener('input',()=>{
+    const value=input.value;
+    if(!/[\s,#]/.test(value)) return;
+    const parts=value.split(/[\s,#]+/);
+    const last=/[\s,#]$/.test(value)?'':parts.pop();
+    addHashtagTokens(parts);
+    input.value=last;
+  });
+  input.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){
+      e.preventDefault();
+      commitHashtagInput();
+    } else if(e.key==='Backspace'&&!input.value&&editHashtags.length){
+      editHashtags.pop();
+      renderHashtagsEditor();
+    }
+  });
+  input.addEventListener('blur',commitHashtagInput);
 }
 
 const SOCIAL_PLATFORMS = [
@@ -212,12 +344,66 @@ function hasSocialLinks(socials={}){
   return SOCIAL_PLATFORMS.some(platform=>!!(socials&&socials[platform.key]));
 }
 
-function setEditSocialEnabled(enabled){
-  const checkbox=document.getElementById('edit-social-enabled');
-  const fields=document.getElementById('edit-social-fields');
+function setPerfilSocialEnabled(enabled){
+  const checkbox=document.getElementById('perfil-social-enabled');
+  const fields=document.getElementById('perfil-social-fields');
   if(checkbox) checkbox.checked=!!enabled;
   if(fields) fields.classList.toggle('hidden',!enabled);
-  if(!enabled) setSocialInputs('edit',{});
+  if(!enabled) setSocialInputs('perfil',{});
+}
+
+// Las redes sociales son del PERFIL del usuario, no de cada línea. Como
+// Firestore guarda el dueño dentro de cada línea (ownerName, ownerPhotoURL…),
+// las redes se guardan igual: el mismo "ownerSocials" copiado en todas las
+// líneas del usuario. Así el editor sigue leyendo tl.ownerSocials sin cambios.
+function socialsStorageKey(){ return currentUser?`lt_perfil_socials_${currentUser.uid}`:''; }
+
+// Devuelve las redes que el usuario tiene configuradas ahora mismo.
+function getMySocials(){
+  if(!currentUser) return {};
+  const mine=(_timelinesCache||[]).filter(t=>t.ownerId===currentUser.uid);
+  if(mine.length){
+    const withSocials=mine.find(t=>hasSocialLinks(t.ownerSocials));
+    return withSocials?{...withSocials.ownerSocials}:{};
+  }
+  // Sin líneas todavía: usamos lo último guardado en este navegador, para
+  // que la primera línea que cree ya nazca con sus redes.
+  try {
+    return JSON.parse(localStorage.getItem(socialsStorageKey())||'{}')||{};
+  } catch(e){ return {}; }
+}
+
+async function openModalPerfilConfig(){
+  if(!currentUser){ showAuth(); return; }
+  try { await fetchTimelines(); } catch(e){ console.error(e); }
+  const socials=getMySocials();
+  setSocialInputs('perfil',socials);
+  setPerfilSocialEnabled(hasSocialLinks(socials));
+  showModal('modal-perfil-config');
+}
+
+async function guardarPerfilConfig(){
+  if(!currentUser) return;
+  const enabled=document.getElementById('perfil-social-enabled').checked;
+  const socials=enabled?getSocialsFromInputs('perfil'):{};
+  const btn=document.getElementById('btn-perfil-config-guardar');
+  btn.disabled=true;
+  btn.textContent='Guardando...';
+  try {
+    try { localStorage.setItem(socialsStorageKey(),JSON.stringify(socials)); } catch(e){}
+    const timelines=await fetchTimelines();
+    const mine=timelines.filter(t=>t.ownerId===currentUser.uid);
+    const changed=mine.filter(t=>JSON.stringify(t.ownerSocials||{})!==JSON.stringify(socials));
+    await Promise.all(changed.map(t=>updateTimeline(t.id,{ownerSocials:socials})));
+    hideModal('modal-perfil-config');
+    toast('Configuración guardada ✓');
+  } catch(e){
+    console.error(e);
+    toast(friendlyFirestoreError(e),6000);
+  } finally {
+    btn.disabled=false;
+    btn.textContent='Guardar cambios';
+  }
 }
 
 function renderOwnerSocialLinks(tl){
@@ -582,6 +768,9 @@ function renderEventSectionSelect(tl,selectedId=''){
   ).join('');
   const exists=sections.some(section=>section.id===selectedId);
   select.value=exists?selectedId:'';
+  // Sin secciones creadas no hay nada que elegir: ocultamos todo el campo.
+  const group=select.closest('.form-group');
+  if(group) group.classList.toggle('hidden',sections.length===0);
 }
 
 function getFilteredTimelineEvents(tl){
@@ -738,15 +927,11 @@ function renderRelatedTimelinesEditor(query=''){
   const selectedItems=relatedEditorSelectedIds
     .map(id=>relatedEditorOptions.find(tl=>tl.id===id))
     .filter(Boolean);
-  const q=String(query||'').trim().toLowerCase();
+  const q=normalizeSearchText(String(query||'').trim().replace(/^#+/,''));
   const suggestions=q
     ? relatedEditorOptions
         .filter(tl=>!selected.has(tl.id))
-        .filter(tl=>[
-          tl.nombre||'',
-          tl.desc||'',
-          tl.ownerName||''
-        ].join(' ').toLowerCase().includes(q))
+        .filter(tl=>timelineSearchText(tl).includes(q))
         .slice(0,6)
     : [];
 
@@ -1339,9 +1524,14 @@ function buildLikeRow(tl){
 function buildTimelineCardInfo(tl,count,extraHtml=''){
   const info=document.createElement('div');
   info.className='timeline-card-info';
+  const tags=Array.isArray(tl.hashtags)?tl.hashtags:[];
+  const tagsHtml=tags.length
+    ? `<div class="card-hashtags">${tags.slice(0,3).map(t=>'#'+escHtml(t)).join(' ')}${tags.length>3?` +${tags.length-3}`:''}</div>`
+    : '';
   info.innerHTML=`
     <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
     <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>
+    ${tagsHtml}
     ${extraHtml}`;
   return info;
 }
@@ -1349,14 +1539,13 @@ function buildTimelineCardInfo(tl,count,extraHtml=''){
 // Filtra por nombre (si hay texto buscado) y ordena según el modo
 // elegido. Devuelve un arreglo nuevo, sin modificar el original.
 function filtrarYOrdenarTimelines(lista, query, sortBy){
-  const q=(query||'').trim().toLowerCase();
+  // Si la búsqueda empieza con "#", se buscan solo hashtags.
+  const raw=(query||'').trim();
+  const soloHashtags=raw.startsWith('#');
+  const q=normalizeSearchText(raw.replace(/^#+/,'')).trim();
   let out = q ? lista.filter(tl=>{
-    const texto=[
-      tl.nombre||'',
-      tl.desc||'',
-      tl.ownerName||''
-    ].join(' ').toLowerCase();
-    return texto.includes(q);
+    if(soloHashtags) return (tl.hashtags||[]).some(tag=>normalizeSearchText(tag).includes(q));
+    return timelineSearchText(tl).includes(q);
   }) : [...lista];
   switch(sortBy){
     case 'oldest':
@@ -1634,6 +1823,7 @@ async function renderPerfil(uid,options={}){
     ? 'Tus líneas de tiempo'
     : `Líneas de tiempo de ${nombre}`;
   document.getElementById('btn-nueva-perfil').classList.toggle('hidden', !esPropio);
+  document.getElementById('btn-perfil-config').classList.toggle('hidden', !esPropio);
 
   // Los textos de "vacío" cambian según si de plano no hay líneas de
   // tiempo, o si hay pero la búsqueda actual no encontró ninguna.
@@ -2118,6 +2308,7 @@ async function openTimeline(id){
 
   document.documentElement.style.setProperty('--accent',tl.color||'#E8845A');
   document.documentElement.style.setProperty('--accent-glow',hexToAlpha(tl.color||'#E8845A',0.18));
+  applyTimelineFondo(tl.fondo);
   document.getElementById('editor-title').textContent=tl.nombre;
   document.getElementById('editor-desc').textContent=tl.desc||'';
 
@@ -2233,9 +2424,12 @@ async function openModalEditarTimeline(){
   document.getElementById('edit-tl-nombre').value=tl.nombre||'';
   document.getElementById('edit-tl-desc').value=tl.desc||'';
   document.getElementById('edit-tl-privada').checked=!!tl.privada;
-  setSocialInputs('edit',tl.ownerSocials||{});
-  setEditSocialEnabled(hasSocialLinks(tl.ownerSocials||{}));
   selectEditColor(tl.color||'#E8845A');
+  selectFondo('editar',tl.fondo);
+  editHashtags=normalizeHashtags(tl.hashtags);
+  renderHashtagsEditor();
+  const hashtagsInput=document.getElementById('hashtags-input');
+  if(hashtagsInput) hashtagsInput.value='';
   editTlImagenUrl=tl.imagenUrl||null;
   editTlImagenSubiendo=false;
   renderEditTlImagen();
@@ -2258,6 +2452,9 @@ async function guardarEdicionTimeline(){
   const desc=document.getElementById('edit-tl-desc').value.trim();
   const privada=document.getElementById('edit-tl-privada').checked;
   const color=selectedEditColor;
+  const fondo=selectedEditFondo;
+  commitHashtagInput();
+  const hashtags=normalizeHashtags(editHashtags);
   const lecturas=getTimelineNotesFromEditor();
   const secciones=getTimelineSectionsFromEditor();
   const validSectionIds=new Set(secciones.map(section=>section.id));
@@ -2266,20 +2463,19 @@ async function guardarEdicionTimeline(){
   );
   const relatedTimelineIds=normalizeRelatedTimelineIds(getRelatedTimelineIdsFromEditor());
   const imagenUrl=editTlImagenUrl||null;
-  const socialEnabled=document.getElementById('edit-social-enabled').checked;
-  const ownerSocials=socialEnabled?getSocialsFromInputs('edit'):{};
   const tl=_timelineCache[activeTimelineId];
   const actualizadoEn=Date.now();
-  _timelineCache[activeTimelineId]={...tl,nombre,desc,privada,color,lecturas,secciones,eventos,relatedTimelineIds,imagenUrl,ownerSocials,actualizadoEn};
+  _timelineCache[activeTimelineId]={...tl,nombre,desc,privada,color,fondo,hashtags,lecturas,secciones,eventos,relatedTimelineIds,imagenUrl,actualizadoEn};
   document.getElementById('editor-title').textContent=nombre;
   document.getElementById('editor-desc').textContent=desc;
   document.documentElement.style.setProperty('--accent',color);
   document.documentElement.style.setProperty('--accent-glow',hexToAlpha(color,0.18));
+  applyTimelineFondo(fondo);
   renderTimelineFromCache(_timelineCache[activeTimelineId]);
   hideModal('modal-editar-tl');
   toast('Línea de tiempo actualizada ✓');
   try {
-    await updateTimeline(activeTimelineId,{nombre,desc,privada,color,lecturas,secciones,eventos,relatedTimelineIds,imagenUrl,ownerSocials,actualizadoEn});
+    await updateTimeline(activeTimelineId,{nombre,desc,privada,color,fondo,hashtags,lecturas,secciones,eventos,relatedTimelineIds,imagenUrl,actualizadoEn});
   } catch(e){
     _timelineCache[activeTimelineId]=tl;
     document.getElementById('editor-title').textContent=tl.nombre;
@@ -2291,6 +2487,7 @@ async function guardarEdicionTimeline(){
 
 function selectEditColor(color){
   selectedEditColor=color;
+  setFondoPickerAccent('editar',color);
   document.querySelectorAll('.edit-tl-color').forEach(btn=>{
     btn.classList.toggle('selected',btn.dataset.color===color);
   });
@@ -2504,6 +2701,7 @@ function openModalNueva(){
   document.getElementById('input-desc').value='';
   document.getElementById('input-privada').checked=false;
   selectColor('#E8845A');
+  selectFondo('nueva','liso');
   pendingTlImagenUrl=null;
   pendingTlImagenSubiendo=false;
   renderNuevaTlImagen();
@@ -2523,7 +2721,7 @@ async function crearTimeline(){
   btnCrear.textContent='Creando...';
 
   try {
-    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor,imagenUrl:pendingTlImagenUrl||null,privada,ownerSocials:{}});
+    const {ref, writePromise}=createTimeline({nombre,desc,color:selectedColor,fondo:selectedFondo,imagenUrl:pendingTlImagenUrl||null,privada,ownerSocials:getMySocials()});
     hideModal('modal-nueva');
     await openTimeline(ref.id);
     toast('Línea de tiempo creada ✓');
@@ -2693,6 +2891,7 @@ function handleImageFiles(files){
 
 function selectColor(color){
   selectedColor=color;
+  setFondoPickerAccent('nueva',color);
   document.querySelectorAll('.color-dot:not(.edit-tl-color)').forEach(btn=>{
     btn.classList.toggle('selected',btn.dataset.color===color);
   });
@@ -2759,6 +2958,10 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-perfil-back').addEventListener('click',renderHome);
   document.getElementById('btn-nueva-perfil').addEventListener('click',openModalNueva);
   document.getElementById('btn-copy-perfil-link').addEventListener('click',copyCurrentProfileLink);
+  document.getElementById('btn-perfil-config').addEventListener('click',openModalPerfilConfig);
+  document.getElementById('modal-close-perfil-config').addEventListener('click',()=>hideModal('modal-perfil-config'));
+  document.getElementById('btn-perfil-config-guardar').addEventListener('click',guardarPerfilConfig);
+  document.getElementById('perfil-social-enabled').addEventListener('change',e=>setPerfilSocialEnabled(e.target.checked));
   document.getElementById('btn-toggle-perfil-stats').addEventListener('click',()=>{
     perfilViewMode = perfilViewMode==='stats' ? 'lineas' : 'stats';
     applyPerfilViewMode();
@@ -2796,7 +2999,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-edit-tl').addEventListener('click',openModalEditarTimeline);
   document.getElementById('btn-editar-tl-confirmar').addEventListener('click',guardarEdicionTimeline);
   document.getElementById('btn-add-timeline-section').addEventListener('click',()=>addTimelineSectionRow());
-  document.getElementById('edit-social-enabled').addEventListener('change',e=>setEditSocialEnabled(e.target.checked));
   document.getElementById('btn-add-timeline-note').addEventListener('click',()=>{
     const tl=_timelineCache[activeTimelineId];
     addTimelineNoteRow({},ordenarEventos((tl&&tl.eventos)||[]));
@@ -2892,15 +3094,20 @@ document.addEventListener('DOMContentLoaded',()=>{
     btn.addEventListener('click',()=>selectColor(btn.dataset.color));
   });
   selectColor('#E8845A');
+  setupHashtagsEditor();
+  selectFondo('nueva','liso');
+  document.querySelectorAll('.fondo-option').forEach(btn=>{
+    btn.addEventListener('click',()=>selectFondo(btn.closest('.fondo-picker').dataset.scope,btn.dataset.fondo));
+  });
 
-  ['modal-nueva','modal-ver'].forEach(id=>{
+  ['modal-nueva','modal-ver','modal-perfil-config'].forEach(id=>{
     document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) hideModal(id); });
   });
   document.getElementById('modal-evento').addEventListener('click',function(e){ if(e.target===this) closeEventModal(); });
 
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){
-      ['modal-nueva','modal-ver','modal-editar-tl'].forEach(id=>hideModal(id));
+      ['modal-nueva','modal-ver','modal-editar-tl','modal-perfil-config'].forEach(id=>hideModal(id));
       closeEventModal();
     }
   });
