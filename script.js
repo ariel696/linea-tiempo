@@ -27,6 +27,7 @@ import {
   getDoc,
   query,
   orderBy,
+  runTransaction,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -101,6 +102,7 @@ let confirmationResult = null;
 let isSavingEvent      = false;
 let isCreatingTimeline = false;
 let viewingProfileUid  = null;
+let viewingProfileUsername = '';
 let lastListScreen     = 'home';
 
 // Estado de búsqueda/orden de las grillas de líneas de tiempo (inicio y perfil).
@@ -135,6 +137,7 @@ let editTlImagenSubiendo    = false;
 let _timelinesCache = null;
 let _timelineCache  = {};
 let _pendingTimelineWrites = {};
+let _userProfileCache = {};
 let _renderHomeSeq = 0;
 
 // Estado del "modo selección" para borrar varias líneas de tiempo a la vez.
@@ -156,6 +159,264 @@ const ZOOM_STEP   = 0.15;
 // ─── UTILIDADES ───────────────────────────────────────────
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
 function escHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ─── INFORMACIÓN DETALLADA (estado de verificación) ────────
+// El estado "Falta verificar" / "Información verificada" solo se ve si el
+// espectador marca la casilla "Información detallada" de la barra del editor.
+(function setupDetailToggle(){
+  const chk=document.getElementById('chk-info-detallada');
+  if(!chk) return;
+  const apply=()=>document.body.classList.toggle('show-verify-details',chk.checked);
+  chk.addEventListener('change',apply);
+  apply();
+})();
+
+// ─── PAÍS DEL EVENTO (bandera circular) ───────────────────
+// Nombre del país (tal como aparece en el selector) -> código ISO de 2 letras.
+const PAIS_CODIGOS = {
+  "Afganistán": "af",
+  "Albania": "al",
+  "Alemania": "de",
+  "Andorra": "ad",
+  "Angola": "ao",
+  "Antigua y Barbuda": "ag",
+  "Arabia Saudita": "sa",
+  "Argelia": "dz",
+  "Argentina": "ar",
+  "Armenia": "am",
+  "Australia": "au",
+  "Austria": "at",
+  "Azerbaiyán": "az",
+  "Bahamas": "bs",
+  "Bangladés": "bd",
+  "Barbados": "bb",
+  "Baréin": "bh",
+  "Bélgica": "be",
+  "Belice": "bz",
+  "Benín": "bj",
+  "Bielorrusia": "by",
+  "Bolivia": "bo",
+  "Bosnia y Herzegovina": "ba",
+  "Botsuana": "bw",
+  "Brasil": "br",
+  "Brunéi": "bn",
+  "Bulgaria": "bg",
+  "Burkina Faso": "bf",
+  "Burundi": "bi",
+  "Bután": "bt",
+  "Cabo Verde": "cv",
+  "Camboya": "kh",
+  "Camerún": "cm",
+  "Canadá": "ca",
+  "Catar": "qa",
+  "Chad": "td",
+  "Chile": "cl",
+  "China": "cn",
+  "Chipre": "cy",
+  "Ciudad del Vaticano": "va",
+  "Colombia": "co",
+  "Comoras": "km",
+  "Corea del Norte": "kp",
+  "Corea del Sur": "kr",
+  "Costa de Marfil": "ci",
+  "Costa Rica": "cr",
+  "Croacia": "hr",
+  "Cuba": "cu",
+  "Dinamarca": "dk",
+  "Dominica": "dm",
+  "Ecuador": "ec",
+  "Egipto": "eg",
+  "El Salvador": "sv",
+  "Emiratos Árabes Unidos": "ae",
+  "Eritrea": "er",
+  "Eslovaquia": "sk",
+  "Eslovenia": "si",
+  "España": "es",
+  "Estados Unidos": "us",
+  "Estonia": "ee",
+  "Esuatini": "sz",
+  "Etiopía": "et",
+  "Filipinas": "ph",
+  "Finlandia": "fi",
+  "Fiyi": "fj",
+  "Francia": "fr",
+  "Gabón": "ga",
+  "Gambia": "gm",
+  "Georgia": "ge",
+  "Ghana": "gh",
+  "Granada": "gd",
+  "Grecia": "gr",
+  "Guatemala": "gt",
+  "Guinea": "gn",
+  "Guinea-Bisáu": "gw",
+  "Guinea Ecuatorial": "gq",
+  "Guyana": "gy",
+  "Haití": "ht",
+  "Honduras": "hn",
+  "Hungría": "hu",
+  "India": "in",
+  "Indonesia": "id",
+  "Irak": "iq",
+  "Irán": "ir",
+  "Irlanda": "ie",
+  "Islandia": "is",
+  "Islas Marshall": "mh",
+  "Islas Salomón": "sb",
+  "Israel": "il",
+  "Italia": "it",
+  "Jamaica": "jm",
+  "Japón": "jp",
+  "Jordania": "jo",
+  "Kazajistán": "kz",
+  "Kenia": "ke",
+  "Kirguistán": "kg",
+  "Kiribati": "ki",
+  "Kosovo": "xk",
+  "Kuwait": "kw",
+  "Laos": "la",
+  "Lesoto": "ls",
+  "Letonia": "lv",
+  "Líbano": "lb",
+  "Liberia": "lr",
+  "Libia": "ly",
+  "Liechtenstein": "li",
+  "Lituania": "lt",
+  "Luxemburgo": "lu",
+  "Macedonia del Norte": "mk",
+  "Madagascar": "mg",
+  "Malasia": "my",
+  "Malaui": "mw",
+  "Maldivas": "mv",
+  "Malí": "ml",
+  "Malta": "mt",
+  "Marruecos": "ma",
+  "Mauricio": "mu",
+  "Mauritania": "mr",
+  "México": "mx",
+  "Micronesia": "fm",
+  "Moldavia": "md",
+  "Mónaco": "mc",
+  "Mongolia": "mn",
+  "Montenegro": "me",
+  "Mozambique": "mz",
+  "Myanmar": "mm",
+  "Namibia": "na",
+  "Nauru": "nr",
+  "Nepal": "np",
+  "Nicaragua": "ni",
+  "Níger": "ne",
+  "Nigeria": "ng",
+  "Noruega": "no",
+  "Nueva Zelanda": "nz",
+  "Omán": "om",
+  "Países Bajos": "nl",
+  "Pakistán": "pk",
+  "Palaos": "pw",
+  "Palestina": "ps",
+  "Panamá": "pa",
+  "Papúa Nueva Guinea": "pg",
+  "Paraguay": "py",
+  "Perú": "pe",
+  "Polonia": "pl",
+  "Portugal": "pt",
+  "Reino Unido": "gb",
+  "República Centroafricana": "cf",
+  "República Checa": "cz",
+  "República del Congo": "cg",
+  "República Democrática del Congo": "cd",
+  "República Dominicana": "do",
+  "Ruanda": "rw",
+  "Rumania": "ro",
+  "Rusia": "ru",
+  "Samoa": "ws",
+  "San Cristóbal y Nieves": "kn",
+  "San Marino": "sm",
+  "San Vicente y las Granadinas": "vc",
+  "Santa Lucía": "lc",
+  "Santo Tomé y Príncipe": "st",
+  "Senegal": "sn",
+  "Serbia": "rs",
+  "Seychelles": "sc",
+  "Sierra Leona": "sl",
+  "Singapur": "sg",
+  "Siria": "sy",
+  "Somalia": "so",
+  "Sri Lanka": "lk",
+  "Sudáfrica": "za",
+  "Sudán": "sd",
+  "Sudán del Sur": "ss",
+  "Suecia": "se",
+  "Suiza": "ch",
+  "Surinam": "sr",
+  "Tailandia": "th",
+  "Taiwán": "tw",
+  "Tanzania": "tz",
+  "Tayikistán": "tj",
+  "Timor Oriental": "tl",
+  "Togo": "tg",
+  "Tonga": "to",
+  "Trinidad y Tobago": "tt",
+  "Túnez": "tn",
+  "Turkmenistán": "tm",
+  "Turquía": "tr",
+  "Tuvalu": "tv",
+  "Ucrania": "ua",
+  "Uganda": "ug",
+  "Uruguay": "uy",
+  "Uzbekistán": "uz",
+  "Vanuatu": "vu",
+  "Venezuela": "ve",
+  "Vietnam": "vn",
+  "Yemen": "ye",
+  "Yibuti": "dj",
+  "Zambia": "zm",
+  "Zimbabue": "zw"
+};
+
+function getCountryFlagUrl(code){
+  return 'https://hatscripts.github.io/circle-flags/flags/'+code+'.svg';
+}
+
+// Deja el país en su forma oficial (ignora mayúsculas y tildes). Si no existe, devuelve ''.
+function normalizeCountryName(value){
+  const clean=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim().toLowerCase();
+  const wanted=clean(value);
+  if(!wanted) return '';
+  return Object.keys(PAIS_CODIGOS).find(name=>clean(name)===wanted)||'';
+}
+
+function getEventCountryValue(){
+  const el=document.getElementById('ev-pais');
+  return el?normalizeCountryName(el.value):'';
+}
+
+function setEventCountryValue(value){
+  const el=document.getElementById('ev-pais');
+  if(el) el.value=value||'';
+}
+
+// Banderita circular para la esquina superior derecha de la tarjeta.
+function getCountryFlagHtml(ev){
+  const pais=ev&&ev.pais;
+  const code=pais&&PAIS_CODIGOS[pais];
+  if(!code) return '';
+  return `<img class="event-flag" src="${getCountryFlagUrl(code)}" alt="${escHtml(pais)}" title="${escHtml(pais)}" loading="lazy" draggable="false" onerror="this.remove()"/>`;
+}
+
+// País (con su bandera) en la ventana "Ver evento".
+function renderEventCountryView(ev){
+  const el=document.getElementById('ver-pais');
+  if(!el) return;
+  const pais=ev&&ev.pais;
+  const code=pais&&PAIS_CODIGOS[pais];
+  if(!code){
+    el.className='event-country-pill hidden';
+    el.innerHTML='';
+    return;
+  }
+  el.innerHTML=`<img class="event-country-flag" src="${getCountryFlagUrl(code)}" alt="" onerror="this.remove()"/><span>${escHtml(pais)}</span>`;
+  el.className='event-country-pill';
+}
 function hexToAlpha(hex,a){ const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; }
 
 // ─── DISEÑO DE FONDO DE LA LÍNEA DE TIEMPO ────────────────
@@ -344,6 +605,97 @@ function hasSocialLinks(socials={}){
   return SOCIAL_PLATFORMS.some(platform=>!!(socials&&socials[platform.key]));
 }
 
+function normalizeUsername(value){
+  return String(value||'')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g,'-')
+    .replace(/-+/g,'-')
+    .replace(/^[._-]+|[._-]+$/g,'')
+    .slice(0,32);
+}
+
+function isValidUsername(username){
+  return /^[a-z0-9][a-z0-9._-]{2,31}$/.test(username||'');
+}
+
+function suggestUsernameFromUser(user=currentUser){
+  const base=(user&&user.displayName) || (user&&user.email&&user.email.split('@')[0]) || 'usuario';
+  return normalizeUsername(base) || 'usuario';
+}
+
+async function getUserProfile(uid){
+  if(!uid) return null;
+  if(_userProfileCache[uid]) return _userProfileCache[uid];
+  const snap=await getDoc(doc(db,'users',uid));
+  const profile=snap.exists()?{uid,...snap.data()}:null;
+  if(profile) _userProfileCache[uid]=profile;
+  return profile;
+}
+
+async function getUidByUsername(username){
+  const clean=normalizeUsername(username);
+  if(!clean) return '';
+  const snap=await getDoc(doc(db,'usernames',clean));
+  return snap.exists() ? (snap.data().uid||'') : '';
+}
+
+function getMyUsername(){
+  return currentUser && _userProfileCache[currentUser.uid]
+    ? (_userProfileCache[currentUser.uid].username||'')
+    : '';
+}
+
+async function guardarIdentidadPerfil({displayName,username}){
+  if(!currentUser) return null;
+  const cleanUsername=normalizeUsername(username);
+  if(!isValidUsername(cleanUsername)){
+    const err=new Error('El nombre de usuario debe tener 3 a 32 caracteres y empezar con letra o número.');
+    err.code='invalid-username';
+    throw err;
+  }
+  const uid=currentUser.uid;
+  const userRef=doc(db,'users',uid);
+  await runTransaction(db,async tx=>{
+    const userSnap=await tx.get(userRef);
+    const previo=userSnap.exists()?userSnap.data():{};
+    const oldUsername=previo.username||'';
+    const usernameRef=doc(db,'usernames',cleanUsername);
+    const usernameSnap=await tx.get(usernameRef);
+    if(usernameSnap.exists() && usernameSnap.data().uid!==uid){
+      const err=new Error('Ese nombre de usuario ya está en uso.');
+      err.code='username-taken';
+      throw err;
+    }
+    if(oldUsername && oldUsername!==cleanUsername){
+      tx.delete(doc(db,'usernames',oldUsername));
+    }
+    tx.set(usernameRef,{
+      uid,
+      displayName,
+      updatedAt:serverTimestamp()
+    },{merge:true});
+    tx.set(userRef,{
+      uid,
+      username:cleanUsername,
+      displayName,
+      photoURL:currentUser.photoURL||'',
+      email:currentUser.email||'',
+      updatedAt:serverTimestamp()
+    },{merge:true});
+  });
+  const profile={
+    uid,
+    username:cleanUsername,
+    displayName,
+    photoURL:currentUser.photoURL||'',
+    email:currentUser.email||''
+  };
+  _userProfileCache[uid]=profile;
+  return profile;
+}
+
 function setPerfilSocialEnabled(enabled){
   const checkbox=document.getElementById('perfil-social-enabled');
   const fields=document.getElementById('perfil-social-fields');
@@ -373,9 +725,58 @@ function getMySocials(){
   } catch(e){ return {}; }
 }
 
+// Cambiar la foto de perfil (botón de cámara sobre el avatar, al estilo
+// Instagram): sube la imagen elegida a Cloudinary, actualiza el usuario
+// de Firebase Auth y deja la foto guardada en todas tus líneas de tiempo
+// (ownerPhotoURL), igual que se hace con las redes sociales del perfil.
+async function cambiarFotoPerfil(archivo){
+  if(!currentUser || !archivo) return;
+  const avatarEl=document.getElementById('perfil-avatar');
+  const btnEdit=document.getElementById('perfil-avatar-edit');
+  const prevSrc=avatarEl.src;
+  btnEdit.disabled=true;
+  btnEdit.textContent='…';
+  try {
+    const url=await subirImagenCloudinary(archivo);
+    await updateProfile(currentUser,{photoURL:url});
+    try {
+      await setDoc(doc(db,'users',currentUser.uid),{
+        uid:currentUser.uid,
+        photoURL:url,
+        displayName:currentUser.displayName||currentUser.email||'Usuario',
+        email:currentUser.email||'',
+        updatedAt:serverTimestamp()
+      },{merge:true});
+      _userProfileCache[currentUser.uid]={...(_userProfileCache[currentUser.uid]||{}),photoURL:url};
+    } catch(e){ console.error(e); }
+    avatarEl.src=url;
+    avatarEl.style.display='block';
+    updateHeader(currentUser);
+    try {
+      const timelines=await fetchTimelines();
+      const mine=timelines.filter(t=>t.ownerId===currentUser.uid);
+      await Promise.all(mine.map(t=>updateTimeline(t.id,{ownerPhotoURL:url})));
+    } catch(e){ console.error(e); }
+    toast('Foto de perfil actualizada ✓');
+  } catch(e){
+    console.error(e);
+    avatarEl.src=prevSrc;
+    toast('No se pudo actualizar la foto de perfil',6000);
+  } finally {
+    btnEdit.disabled=false;
+    btnEdit.textContent='📷';
+  }
+}
+
 async function openModalPerfilConfig(){
   if(!currentUser){ showAuth(); return; }
   try { await fetchTimelines(); } catch(e){ console.error(e); }
+  let profile=null;
+  try { profile=await getUserProfile(currentUser.uid); } catch(e){ console.error(e); }
+  const displayInput=document.getElementById('perfil-display-name');
+  const usernameInput=document.getElementById('perfil-username-input');
+  if(displayInput) displayInput.value=(profile&&profile.displayName) || currentUser.displayName || '';
+  if(usernameInput) usernameInput.value=(profile&&profile.username) || suggestUsernameFromUser(currentUser);
   const socials=getMySocials();
   setSocialInputs('perfil',socials);
   setPerfilSocialEnabled(hasSocialLinks(socials));
@@ -384,22 +785,38 @@ async function openModalPerfilConfig(){
 
 async function guardarPerfilConfig(){
   if(!currentUser) return;
+  const displayName=(document.getElementById('perfil-display-name').value||'').trim() || 'Usuario';
+  const username=normalizeUsername(document.getElementById('perfil-username-input').value);
   const enabled=document.getElementById('perfil-social-enabled').checked;
   const socials=enabled?getSocialsFromInputs('perfil'):{};
   const btn=document.getElementById('btn-perfil-config-guardar');
   btn.disabled=true;
   btn.textContent='Guardando...';
   try {
+    const profile=await guardarIdentidadPerfil({displayName,username});
+    if(currentUser.displayName!==displayName) await updateProfile(currentUser,{displayName});
     try { localStorage.setItem(socialsStorageKey(),JSON.stringify(socials)); } catch(e){}
     const timelines=await fetchTimelines();
     const mine=timelines.filter(t=>t.ownerId===currentUser.uid);
-    const changed=mine.filter(t=>JSON.stringify(t.ownerSocials||{})!==JSON.stringify(socials));
-    await Promise.all(changed.map(t=>updateTimeline(t.id,{ownerSocials:socials})));
+    const changed=mine.filter(t=>
+      JSON.stringify(t.ownerSocials||{})!==JSON.stringify(socials)
+      || t.ownerName!==displayName
+      || t.ownerUsername!==(profile&&profile.username)
+    );
+    await Promise.all(changed.map(t=>updateTimeline(t.id,{
+      ownerSocials:socials,
+      ownerName:displayName,
+      ownerUsername:profile.username
+    })));
+    updateHeader(currentUser);
+    if(viewingProfileUid===currentUser.uid) await renderPerfil(currentUser.uid,{forceLineas:false});
     hideModal('modal-perfil-config');
     toast('Configuración guardada ✓');
   } catch(e){
     console.error(e);
-    toast(friendlyFirestoreError(e),6000);
+    if(e.code==='username-taken') toast('Ese nombre de usuario ya está ocupado. Prueba otro.',6000);
+    else if(e.code==='invalid-username') toast(e.message,6000);
+    else toast(friendlyFirestoreError(e),6000);
   } finally {
     btn.disabled=false;
     btn.textContent='Guardar cambios';
@@ -440,7 +857,9 @@ function showScreen(name){
 function getRoute(){
   const params=new URLSearchParams(window.location.search);
   return {
-    perfil: params.get('perfil') || ''
+    usuario: params.get('usuario') || '',
+    perfil: params.get('perfil') || '',
+    linea: params.get('linea') || ''
   };
 }
 
@@ -448,7 +867,18 @@ function buildProfileUrl(uid){
   const url=new URL(window.location.href);
   url.search='';
   url.hash='';
-  url.searchParams.set('perfil',uid);
+  const profile=_userProfileCache[uid]||{};
+  if(profile.username) url.searchParams.set('usuario',profile.username);
+  else if(uid===viewingProfileUid && viewingProfileUsername) url.searchParams.set('usuario',viewingProfileUsername);
+  else url.searchParams.set('perfil',uid);
+  return url.toString();
+}
+
+function buildTimelineUrl(id){
+  const url=new URL(window.location.href);
+  url.search='';
+  url.hash='';
+  url.searchParams.set('linea',id);
   return url.toString();
 }
 
@@ -456,7 +886,8 @@ function setRoute(route={},replace=false){
   const url=new URL(window.location.href);
   url.search='';
   url.hash='';
-  if(route.perfil) url.searchParams.set('perfil',route.perfil);
+  if(route.usuario) url.searchParams.set('usuario',route.usuario);
+  else if(route.perfil) url.searchParams.set('perfil',route.perfil);
   const next=url.pathname+url.search+url.hash;
   const current=window.location.pathname+window.location.search+window.location.hash;
   if(next===current) return;
@@ -478,6 +909,19 @@ async function copyCurrentProfileLink(){
 
 async function openRouteFromUrl(){
   const route=getRoute();
+  if(route.linea){
+    await renderHome({skipRouteUpdate:true});
+    await openTimeline(route.linea);
+    return;
+  }
+  if(route.usuario){
+    const uid=await getUidByUsername(route.usuario);
+    if(uid){
+      await renderPerfil(uid,{skipRouteUpdate:true,forceLineas:true,profileUsername:normalizeUsername(route.usuario)});
+      return;
+    }
+    toast('No encontramos ese perfil.');
+  }
   if(route.perfil){
     await renderPerfil(route.perfil,{skipRouteUpdate:true,forceLineas:true});
     return;
@@ -643,7 +1087,8 @@ function createTimeline(data){
     creadoEn:serverTimestamp(),
     ownerId:currentUser.uid,
     ownerName:currentUser.displayName||currentUser.email||'Usuario',
-    ownerPhotoURL:currentUser.photoURL||null
+    ownerPhotoURL:currentUser.photoURL||null,
+    ownerUsername:getMyUsername()||''
   });
   const createdTimeline = {
     id: ref.id,
@@ -651,7 +1096,8 @@ function createTimeline(data){
     eventos: [],
     ownerId: currentUser.uid,
     ownerName: currentUser.displayName || currentUser.email || 'Usuario',
-    ownerPhotoURL: currentUser.photoURL || null
+    ownerPhotoURL: currentUser.photoURL || null,
+    ownerUsername:getMyUsername()||''
   };
   _timelineCache[ref.id] = createdTimeline;
   _timelinesCache = [createdTimeline, ...((_timelinesCache||[]).filter(t=>t.id!==ref.id))];
@@ -1159,7 +1605,7 @@ function getEventImages(ev){
 
 function getVerifyStatusHtml(ev){
   const confirmed=!!(ev&&ev.infoConfirmada);
-  const label=confirmed?'Información confirmada':'Falta verificar';
+  const label=confirmed?'Información verificada':'Falta verificar';
   const cls=confirmed?'confirmed':'pending';
   return `<div class="event-verify-status ${cls}">${label}</div>`;
 }
@@ -1168,7 +1614,7 @@ function renderVerifyStatus(elementId,ev){
   const el=document.getElementById(elementId);
   if(!el) return;
   const confirmed=!!(ev&&ev.infoConfirmada);
-  el.textContent=confirmed?'Información confirmada':'Falta verificar';
+  el.textContent=confirmed?'Información verificada':'Falta verificar';
   el.className=`event-verify-status ${confirmed?'confirmed':'pending'}`;
   el.classList.remove('hidden');
 }
@@ -1204,6 +1650,7 @@ function getEventDraftSnapshot(){
     titulo: document.getElementById('ev-titulo').value.trim(),
     fecha: document.getElementById('ev-fecha').value.trim(),
     descripcion: document.getElementById('ev-descripcion').value.trim(),
+    pais: getEventCountryValue(),
     seccionId: document.getElementById('ev-seccion').value||'',
     imagenes: [...pendingImages],
     subEventos: ordenarSubEventos(getSubtimelineFromEditor())
@@ -1332,11 +1779,13 @@ async function renderHomePrincipalTimeline(timelines){
       const descHtml=ev.descripcion?`<div class="event-descripcion">${escHtml(ev.descripcion)}</div>`:'';
       const yearHtml=getYearLabel(ev.fecha)?`<div class="event-year">${getYearLabel(ev.fecha)}</div>`:'';
       const verifyHtml=getVerifyStatusHtml(ev);
+      const flagHtml=getCountryFlagHtml(ev);
       const sectionHtml=getEventSectionHtml(ev,principal);
       item.innerHTML=`
         <div class="event-spacer"></div>
         ${yearHtml}
-        <div class="event-card">
+        <div class="event-card${flagHtml?' has-flag':''}">
+          ${flagHtml}
           ${imgHtml}
           ${verifyHtml}
           ${sectionHtml}
@@ -1411,10 +1860,19 @@ function buildActividadRow(tl){
 
 // ─── "ME GUSTA" EN LÍNEAS DE TIEMPO ─────────────────────────
 // El campo "likes" es un arreglo de uids en el documento de la línea
-// de tiempo. Solo alguien que no sea el dueño puede darle "me gusta".
-// El dueño puede ver cuántos lleva, pero no puede dárselo a sí mismo.
+// de tiempo. Cualquier usuario logueado puede darle "me gusta",
+// incluido el dueño de la línea de tiempo.
 function getLikesArray(tl){
   return Array.isArray(tl && tl.likes) ? tl.likes : [];
+}
+
+function getTimelineLocalActual(id, fallback){
+  return _timelineCache[id]
+    || (_timelinesCache||[]).find(t=>t.id===id)
+    || (_homeTimelinesRaw||[]).find(t=>t.id===id)
+    || (_perfilTimelinesRaw||[]).find(t=>t.id===id)
+    || fallback
+    || null;
 }
 
 // Refleja un cambio de "likes" en todas las copias locales que
@@ -1442,6 +1900,7 @@ function actualizarBotonLike(id, likes){
   const likedByMe=!!(currentUser && likes.includes(currentUser.uid));
   document.querySelectorAll(`.btn-like[data-id="${id}"]`).forEach(btn=>{
     btn.classList.toggle('liked', likedByMe);
+    btn.title = likedByMe ? 'Quitar me gusta' : 'Dar me gusta';
     const heart=btn.querySelector('.like-heart');
     const countEl=btn.querySelector('.like-count');
     if(heart) heart.textContent = likedByMe ? '❤️' : '🤍';
@@ -1454,18 +1913,15 @@ function actualizarBotonLike(id, likes){
 // y luego guarda en Firestore; si falla, revierte.
 async function toggleLike(tl){
   if(!currentUser){ showAuth(); return; }
-  if(tl.ownerId===currentUser.uid){
-    toast('No puedes darle "me gusta" a tu propia línea de tiempo.');
-    return;
-  }
-  const likesActuales=getLikesArray(tl);
+  const actual=getTimelineLocalActual(tl.id,tl);
+  const likesActuales=getLikesArray(actual);
   const yaLeGusta=likesActuales.includes(currentUser.uid);
   const likes=yaLeGusta
     ? likesActuales.filter(uid=>uid!==currentUser.uid)
     : [...likesActuales,currentUser.uid];
 
-  setLikesLocal(tl.id,likes);
-  actualizarBotonLike(tl.id,likes);
+  setLikesLocal(actual.id,likes);
+  actualizarBotonLike(actual.id,likes);
   // Si estamos parados justo en la vista de estadísticas de un perfil,
   // el total de "me gusta" del muro también cambia al instante.
   const perfilScreen=document.getElementById('screen-perfil');
@@ -1474,37 +1930,30 @@ async function toggleLike(tl){
   }
 
   try {
-    await updateTimeline(tl.id,{likes});
+    await updateTimeline(actual.id,{likes});
   } catch(err){
     console.error(err);
-    setLikesLocal(tl.id,likesActuales);
-    actualizarBotonLike(tl.id,likesActuales);
+    setLikesLocal(actual.id,likesActuales);
+    actualizarBotonLike(actual.id,likesActuales);
     toast('No se pudo guardar el "me gusta". Intenta de nuevo.');
   }
 }
 
-// Construye el botón de "me gusta" que va dentro de cada tarjeta de
-// línea de tiempo, en la esquina superior izquierda.
+// Construye el botón de "me gusta" que va dentro de la fila de
+// acciones de cada tarjeta (me gusta / comentar / compartir / guardar).
 function buildLikeButton(tl){
   const likes=getLikesArray(tl);
   const count=likes.length;
-  const esPropia=!!(currentUser && tl.ownerId===currentUser.uid);
   const likedByMe=!!(currentUser && likes.includes(currentUser.uid));
 
   const btn=document.createElement('button');
   btn.type='button';
-  btn.className='btn-like card-like'+(likedByMe?' liked':'')+(esPropia?' disabled':'');
+  btn.className='btn-like card-action-btn card-action-like'+(likedByMe?' liked':'');
   btn.dataset.id=tl.id;
-  btn.title = esPropia
-    ? 'No puedes darle "me gusta" a tu propia línea de tiempo'
-    : (likedByMe ? 'Quitar me gusta' : 'Dar me gusta');
-  btn.innerHTML = `<span class="like-heart">${likedByMe?'❤️':'🤍'}</span><span class="like-count">${count}</span>`;
+  btn.title = likedByMe ? 'Quitar me gusta' : 'Dar me gusta';
+  btn.innerHTML = `<span class="card-action-icon like-heart">${likedByMe?'❤️':'🤍'}</span><span class="like-count">${count}</span>`;
   btn.addEventListener('click',e=>{
     e.stopPropagation();
-    if(esPropia){
-      toast('No puedes darle "me gusta" a tu propia línea de tiempo.');
-      return;
-    }
     toggleLike(tl);
   });
 
@@ -1521,17 +1970,262 @@ function buildLikeRow(tl){
   return row;
 }
 
+// ─── COMENTARIOS EN LÍNEAS DE TIEMPO ────────────────────────
+// Igual que los "me gusta", se guardan como un arreglo dentro del
+// propio documento de la línea de tiempo: "comentarios", con objetos
+// {uid, nombre, texto, fecha}. "fecha" es un número (Date.now()) y no
+// un serverTimestamp porque Firestore no permite serverTimestamp()
+// dentro de elementos de un arreglo.
+function getComentariosArray(tl){
+  return Array.isArray(tl && tl.comentarios) ? tl.comentarios : [];
+}
+
+function setComentariosLocal(id, comentarios){
+  if(_timelineCache[id]) _timelineCache[id]={..._timelineCache[id],comentarios};
+  if(_timelinesCache){
+    const idx=_timelinesCache.findIndex(t=>t.id===id);
+    if(idx>-1) _timelinesCache[idx]={..._timelinesCache[idx],comentarios};
+  }
+  const hIdx=_homeTimelinesRaw.findIndex(t=>t.id===id);
+  if(hIdx>-1) _homeTimelinesRaw[hIdx]={..._homeTimelinesRaw[hIdx],comentarios};
+  const pIdx=_perfilTimelinesRaw.findIndex(t=>t.id===id);
+  if(pIdx>-1) _perfilTimelinesRaw[pIdx]={..._perfilTimelinesRaw[pIdx],comentarios};
+}
+
+function actualizarContadorComentarios(id, comentarios){
+  const count=(comentarios||[]).length;
+  document.querySelectorAll(`.card-action-comment[data-id="${id}"] .comment-count`).forEach(el=>{
+    el.textContent=count;
+  });
+}
+
+let _comentariosTimelineId=null;
+let _comentariosTimelineRef=null;
+
+function renderComentariosModal(tl){
+  _comentariosTimelineId=tl.id;
+  _comentariosTimelineRef=tl;
+  const lista=document.getElementById('comentarios-lista');
+  const empty=document.getElementById('comentarios-empty');
+  const comentarios=getComentariosArray(tl).slice().sort((a,b)=>(a.fecha||0)-(b.fecha||0));
+
+  lista.querySelectorAll('.comentario-item').forEach(el=>el.remove());
+  empty.style.display = comentarios.length ? 'none' : 'block';
+
+  comentarios.forEach(c=>{
+    const puedeBorrar = currentUser && (currentUser.uid===c.uid || canEdit(tl));
+    const item=document.createElement('div');
+    item.className='comentario-item';
+    item.innerHTML=`
+      <div class="comentario-header">
+        <span class="comentario-autor">${escHtml(c.nombre||'Usuario')}</span>
+        <span class="comentario-fecha">${c.fecha?formatTiempoRelativo(c.fecha):''}</span>
+      </div>
+      <div class="comentario-texto">${escHtml(c.texto||'')}</div>
+      ${puedeBorrar?'<button type="button" class="comentario-borrar">Eliminar</button>':''}
+    `;
+    if(puedeBorrar){
+      item.querySelector('.comentario-borrar').addEventListener('click',()=>borrarComentario(tl.id,c));
+    }
+    lista.appendChild(item);
+  });
+
+  const form=document.getElementById('comentarios-form');
+  const loginNote=document.getElementById('comentarios-login-note');
+  form.classList.toggle('hidden', !currentUser);
+  loginNote.classList.toggle('hidden', !!currentUser);
+  document.getElementById('comentario-texto').value='';
+}
+
+async function openComentarios(tl){
+  renderComentariosModal(getTimelineLocalActual(tl.id,tl));
+  showModal('modal-comentarios');
+}
+
+async function enviarComentario(){
+  if(!currentUser){ showAuth(); return; }
+  const id=_comentariosTimelineId;
+  const tl=_comentariosTimelineRef;
+  if(!id || !tl) return;
+  const textarea=document.getElementById('comentario-texto');
+  const texto=textarea.value.trim();
+  if(!texto) return;
+
+  const nuevo={ uid:currentUser.uid, nombre:currentUser.displayName||currentUser.email||'Usuario', texto, fecha:Date.now() };
+  const anteriores=getComentariosArray(tl);
+  const comentarios=[...anteriores,nuevo];
+
+  const btn=document.getElementById('btn-enviar-comentario');
+  btn.disabled=true;
+  setComentariosLocal(id,comentarios);
+  actualizarContadorComentarios(id,comentarios);
+  renderComentariosModal({...tl,comentarios});
+
+  try {
+    await updateTimeline(id,{comentarios});
+  } catch(e){
+    console.error(e);
+    setComentariosLocal(id,anteriores);
+    actualizarContadorComentarios(id,anteriores);
+    renderComentariosModal({...tl,comentarios:anteriores});
+    toast('No se pudo publicar el comentario. Intenta de nuevo.');
+  } finally {
+    btn.disabled=false;
+  }
+}
+
+async function borrarComentario(id,comentario){
+  const tl=_comentariosTimelineRef && _comentariosTimelineRef.id===id ? _comentariosTimelineRef : null;
+  if(!tl) return;
+  const anteriores=getComentariosArray(tl);
+  const comentarios=anteriores.filter(c=>!(c.uid===comentario.uid && c.fecha===comentario.fecha));
+
+  setComentariosLocal(id,comentarios);
+  actualizarContadorComentarios(id,comentarios);
+  renderComentariosModal({...tl,comentarios});
+
+  try {
+    await updateTimeline(id,{comentarios});
+  } catch(e){
+    console.error(e);
+    setComentariosLocal(id,anteriores);
+    actualizarContadorComentarios(id,anteriores);
+    renderComentariosModal({...tl,comentarios:anteriores});
+    toast('No se pudo eliminar el comentario. Intenta de nuevo.');
+  }
+}
+
+function buildComentarioButton(tl){
+  const count=getComentariosArray(tl).length;
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='card-action-btn card-action-comment';
+  btn.dataset.id=tl.id;
+  btn.title='Ver comentarios';
+  btn.innerHTML=`<span class="card-action-icon">💬</span><span class="comment-count">${count}</span>`;
+  btn.addEventListener('click',e=>{
+    e.stopPropagation();
+    openComentarios(tl);
+  });
+  return btn;
+}
+
+// ─── COMPARTIR UNA LÍNEA DE TIEMPO PUNTUAL ──────────────────
+function buildCompartirButton(tl){
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='card-action-btn card-action-share';
+  btn.title='Compartir';
+  btn.innerHTML=`<span class="card-action-icon">↗</span>`;
+  btn.addEventListener('click',async e=>{
+    e.stopPropagation();
+    const link=buildTimelineUrl(tl.id);
+    if(navigator.share){
+      try { await navigator.share({title:tl.nombre||'Línea de tiempo',url:link}); return; }
+      catch(err){ if(err && err.name==='AbortError') return; }
+    }
+    try {
+      await navigator.clipboard.writeText(link);
+      toast('Enlace copiado ✓');
+    } catch(err){
+      console.error(err);
+      window.prompt('Copia el enlace:',link);
+    }
+  });
+  return btn;
+}
+
+// ─── GUARDAR ("bookmark") LÍNEAS DE TIEMPO ──────────────────
+// Mismo patrón que "likes": un arreglo de uids ("guardadoPor") dentro
+// del documento de la línea de tiempo.
+function getGuardadoArray(tl){
+  return Array.isArray(tl && tl.guardadoPor) ? tl.guardadoPor : [];
+}
+
+function setGuardadoLocal(id, guardadoPor){
+  if(_timelineCache[id]) _timelineCache[id]={..._timelineCache[id],guardadoPor};
+  if(_timelinesCache){
+    const idx=_timelinesCache.findIndex(t=>t.id===id);
+    if(idx>-1) _timelinesCache[idx]={..._timelinesCache[idx],guardadoPor};
+  }
+  const hIdx=_homeTimelinesRaw.findIndex(t=>t.id===id);
+  if(hIdx>-1) _homeTimelinesRaw[hIdx]={..._homeTimelinesRaw[hIdx],guardadoPor};
+  const pIdx=_perfilTimelinesRaw.findIndex(t=>t.id===id);
+  if(pIdx>-1) _perfilTimelinesRaw[pIdx]={..._perfilTimelinesRaw[pIdx],guardadoPor};
+}
+
+function actualizarBotonGuardado(id, guardadoPor){
+  const guardadaPorMi=!!(currentUser && (guardadoPor||[]).includes(currentUser.uid));
+  document.querySelectorAll(`.card-action-save[data-id="${id}"]`).forEach(btn=>{
+    btn.classList.toggle('saved',guardadaPorMi);
+    btn.title = guardadaPorMi ? 'Quitar de guardadas' : 'Guardar';
+    const icon=btn.querySelector('.card-action-icon');
+    if(icon) icon.textContent = guardadaPorMi ? '🔖' : '🏷';
+  });
+}
+
+async function toggleGuardado(tl){
+  if(!currentUser){ showAuth(); return; }
+  const actual=getTimelineLocalActual(tl.id,tl);
+  const actuales=getGuardadoArray(actual);
+  const yaGuardada=actuales.includes(currentUser.uid);
+  const guardadoPor=yaGuardada
+    ? actuales.filter(uid=>uid!==currentUser.uid)
+    : [...actuales,currentUser.uid];
+
+  setGuardadoLocal(actual.id,guardadoPor);
+  actualizarBotonGuardado(actual.id,guardadoPor);
+  if(viewingProfileUid===currentUser.uid && perfilViewMode==='guardados') renderPerfilGuardados();
+
+  try {
+    await updateTimeline(actual.id,{guardadoPor});
+    toast(yaGuardada?'Quitada de guardadas':'Guardada ✓');
+  } catch(e){
+    console.error(e);
+    setGuardadoLocal(actual.id,actuales);
+    actualizarBotonGuardado(actual.id,actuales);
+    toast('No se pudo guardar. Intenta de nuevo.');
+  }
+}
+
+function buildGuardarButton(tl){
+  const guardadoPor=getGuardadoArray(tl);
+  const guardadaPorMi=!!(currentUser && guardadoPor.includes(currentUser.uid));
+  const btn=document.createElement('button');
+  btn.type='button';
+  btn.className='card-action-btn card-action-save'+(guardadaPorMi?' saved':'');
+  btn.dataset.id=tl.id;
+  btn.title = guardadaPorMi ? 'Quitar de guardadas' : 'Guardar';
+  btn.innerHTML=`<span class="card-action-icon">${guardadaPorMi?'🔖':'🏷'}</span>`;
+  btn.addEventListener('click',e=>{
+    e.stopPropagation();
+    toggleGuardado(tl);
+  });
+  return btn;
+}
+
+// Fila completa de acciones (me gusta, comentar, compartir, guardar)
+// que se muestra debajo de la descripción de cada tarjeta.
+function buildCardActionsRow(tl){
+  const row=document.createElement('div');
+  row.className='card-actions-row';
+  row.addEventListener('click',e=>e.stopPropagation());
+  row.appendChild(buildLikeButton(tl));
+  row.appendChild(buildComentarioButton(tl));
+  row.appendChild(buildCompartirButton(tl));
+  row.appendChild(buildGuardarButton(tl));
+  return row;
+}
+
 function buildTimelineCardInfo(tl,count,extraHtml=''){
   const info=document.createElement('div');
   info.className='timeline-card-info';
-  const tags=Array.isArray(tl.hashtags)?tl.hashtags:[];
-  const tagsHtml=tags.length
-    ? `<div class="card-hashtags">${tags.slice(0,3).map(t=>'#'+escHtml(t)).join(' ')}${tags.length>3?` +${tags.length-3}`:''}</div>`
-    : '';
+  // Los hashtags (tl.hashtags) NO se muestran al usuario: solo se usan
+  // internamente para el buscador (ver filtrarYOrdenarTimelines y
+  // timelineSearchText). Por eso ya no generamos tagsHtml ni lo insertamos.
   info.innerHTML=`
     <div class="card-desc">${escHtml(tl.desc||'Sin descripción')}</div>
     <div class="card-meta"><span class="dot"></span>${count===0?'Sin eventos aún':count+(count===1?' evento':' eventos')}</div>
-    ${tagsHtml}
     ${extraHtml}`;
   return info;
 }
@@ -1678,8 +2372,7 @@ function appendHomeTimelineCard(grid,tl,i,{allowBulkSelection=true}={}){
   card.style.setProperty('--card-accent',tl.color||'#E8845A');
   const count=(tl.eventos||[]).length;
   const esPropia=currentUser&&tl.ownerId===currentUser.uid;
-  const ownerLabel=tl.ownerName?`<span class="card-owner card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">por ${escHtml(tl.ownerName)}</span>`:'';
-  const propiaLabel=esPropia?`<span class="card-owner card-owner--propia card-owner-link" data-owner-id="${escHtml(tl.ownerId||'')}">✎ Tuya</span>`:ownerLabel;
+  const propiaLabel=esPropia?`<span class="card-owner card-owner--propia">✎ Tuya</span>`:'';
   const puedeBorrar=canEdit(tl);
   const puedeSeleccionar=allowBulkSelection && modoSeleccion && puedeBorrar;
   const checkboxHtml = puedeSeleccionar
@@ -1705,16 +2398,9 @@ function appendHomeTimelineCard(grid,tl,i,{allowBulkSelection=true}={}){
   } else {
     card.addEventListener('click',()=>openTimeline(tl.id));
   }
-  if(!puedeSeleccionar) wrap.appendChild(buildLikeButton(tl));
   wrap.appendChild(card);
   wrap.appendChild(buildTimelineCardInfo(tl,count,propiaLabel));
-  const ownerLink=wrap.querySelector('.card-owner-link');
-  if(ownerLink && tl.ownerId){
-    ownerLink.addEventListener('click',e=>{
-      e.stopPropagation();
-      renderPerfil(tl.ownerId);
-    });
-  }
+  if(!puedeSeleccionar) wrap.appendChild(buildCardActionsRow(tl));
   grid.appendChild(wrap);
 }
 
@@ -1770,7 +2456,10 @@ function renderHomeSearchResults(){
 // clic en el nombre del dueño dentro de cualquier tarjeta.
 async function renderPerfil(uid,options={}){
   if(!uid) return;
-  if(!options.skipRouteUpdate) setRoute({perfil:uid});
+  let profile=null;
+  try { profile=await getUserProfile(uid); } catch(e){ console.error(e); }
+  const routeUsername=options.profileUsername || (profile&&profile.username) || '';
+  if(!options.skipRouteUpdate) setRoute(routeUsername?{usuario:routeUsername}:{perfil:uid});
   // Si cambiamos de perfil (otro usuario), reseteamos la búsqueda/orden
   // para no arrastrar un filtro que no tiene sentido en el nuevo muro.
   if(viewingProfileUid!==uid || options.forceLineas){
@@ -1779,6 +2468,7 @@ async function renderPerfil(uid,options={}){
     perfilViewMode='lineas';
   }
   viewingProfileUid=uid;
+  viewingProfileUsername=routeUsername;
   lastListScreen='perfil';
   const seq=++_renderHomeSeq;
   showScreen('perfil');
@@ -1800,30 +2490,56 @@ async function renderPerfil(uid,options={}){
   // Auth (siempre disponibles). Si es el perfil de otra persona, no
   // tenemos acceso a su cuenta de Auth, así que usamos lo que quedó
   // guardado en cualquiera de sus líneas de tiempo (ownerName/ownerPhotoURL).
-  let nombre='Usuario', foto='';
+  let nombre='Usuario', foto='', username=routeUsername;
   if(esPropio && currentUser){
-    nombre=currentUser.displayName||currentUser.email||'Usuario';
-    foto=currentUser.photoURL||'';
+    nombre=(profile&&profile.displayName) || currentUser.displayName || currentUser.email || 'Usuario';
+    foto=(profile&&profile.photoURL) || currentUser.photoURL || '';
+    username=(profile&&profile.username) || username;
   } else if(todasDelUsuario.length){
-    nombre=todasDelUsuario[0].ownerName||'Usuario';
-    foto=todasDelUsuario[0].ownerPhotoURL||'';
+    nombre=(profile&&profile.displayName) || todasDelUsuario[0].ownerName || 'Usuario';
+    foto=(profile&&profile.photoURL) || todasDelUsuario[0].ownerPhotoURL || '';
+    username=(profile&&profile.username) || todasDelUsuario[0].ownerUsername || username;
+  } else if(profile){
+    nombre=profile.displayName||'Usuario';
+    foto=profile.photoURL||'';
+    username=profile.username||username;
   }
 
   document.getElementById('perfil-nombre').textContent=nombre;
+  const usernameEl=document.getElementById('perfil-username');
+  if(username){
+    usernameEl.textContent='@'+username;
+    usernameEl.classList.remove('hidden');
+    viewingProfileUsername=username;
+  } else {
+    usernameEl.textContent='';
+    usernameEl.classList.add('hidden');
+  }
   const avatarEl=document.getElementById('perfil-avatar');
   if(foto){ avatarEl.src=foto; avatarEl.style.display='block'; }
   else { avatarEl.style.display='none'; }
+  // El botón de "cambiar foto" (cámara) solo se muestra en tu propio perfil.
+  document.getElementById('perfil-avatar-edit').classList.toggle('hidden', !esPropio);
 
-  const countLabel = visibles.length===0?'Sin líneas de tiempo aún'
-    : `${visibles.length} línea${visibles.length===1?'':'s'} de tiempo`;
-  const privLabel = (esPropio && numPrivadas>0) ? ` (${numPrivadas} privada${numPrivadas===1?'':'s'})` : '';
-  document.getElementById('perfil-count').textContent = countLabel+privLabel;
+  // Fila de estadísticas estilo Instagram: líneas de tiempo, eventos
+  // totales (sumando los de todas las líneas visibles) y privadas.
+  const totalEventos = visibles.reduce((acc,tl)=>acc+((tl.eventos&&tl.eventos.length)||0),0);
+  document.getElementById('perfil-stat-lineas').textContent = visibles.length;
+  document.getElementById('perfil-stat-eventos').textContent = totalEventos;
+  const privadasWrap = document.getElementById('perfil-stat-privadas-wrap');
+  if(esPropio && numPrivadas>0){
+    document.getElementById('perfil-stat-privadas').textContent = numPrivadas;
+    privadasWrap.classList.remove('hidden');
+  } else {
+    privadasWrap.classList.add('hidden');
+  }
 
   document.getElementById('perfil-grid-title').textContent = esPropio
     ? 'Tus líneas de tiempo'
     : `Líneas de tiempo de ${nombre}`;
   document.getElementById('btn-nueva-perfil').classList.toggle('hidden', !esPropio);
   document.getElementById('btn-perfil-config').classList.toggle('hidden', !esPropio);
+  document.getElementById('btn-toggle-perfil-guardados').classList.toggle('hidden', !esPropio);
 
   // Los textos de "vacío" cambian según si de plano no hay líneas de
   // tiempo, o si hay pero la búsqueda actual no encontró ninguna.
@@ -1846,22 +2562,42 @@ async function renderPerfil(uid,options={}){
   applyPerfilViewMode();
 }
 
-// Muestra la sección de "Líneas de tiempo" o la de "Estadísticas del
-// perfil" según perfilViewMode, y deja el botón con el texto correcto.
+// Muestra la sección de "Líneas de tiempo", "Estadísticas del perfil"
+// o "Guardadas" según perfilViewMode, y deja los botones con el texto
+// correcto.
 function applyPerfilViewMode(){
-  const btn = document.getElementById('btn-toggle-perfil-stats');
+  const btnStats = document.getElementById('btn-toggle-perfil-stats');
+  const btnGuardados = document.getElementById('btn-toggle-perfil-guardados');
   const lineasSection = document.getElementById('perfil-lineas-section');
   const statsSection = document.getElementById('perfil-stats-section');
-  if(perfilViewMode==='stats'){
-    lineasSection.classList.add('hidden');
-    statsSection.classList.remove('hidden');
-    btn.textContent = '← Ver líneas de tiempo';
-    renderPerfilStats();
-  } else {
-    statsSection.classList.add('hidden');
-    lineasSection.classList.remove('hidden');
-    btn.textContent = '📊 Estadísticas del perfil';
-  }
+  const guardadosSection = document.getElementById('perfil-guardados-section');
+
+  lineasSection.classList.toggle('hidden', perfilViewMode!=='lineas');
+  statsSection.classList.toggle('hidden', perfilViewMode!=='stats');
+  guardadosSection.classList.toggle('hidden', perfilViewMode!=='guardados');
+
+  btnStats.textContent = perfilViewMode==='stats' ? '← Ver líneas de tiempo' : '📊 Estadísticas del perfil';
+  btnGuardados.textContent = perfilViewMode==='guardados' ? '← Ver líneas de tiempo' : '🔖 Guardadas';
+
+  if(perfilViewMode==='stats') renderPerfilStats();
+  else if(perfilViewMode==='guardados') renderPerfilGuardados();
+}
+
+// Dibuja la grilla de "Guardadas": todas las líneas de tiempo (de
+// cualquier usuario) que el dueño del perfil marcó con el ícono 🔖,
+// y que todavía puede ver (si una se volvió privada y ya no es suya,
+// deja de aparecer aquí).
+function renderPerfilGuardados(){
+  const grid=document.getElementById('perfil-guardados-grid');
+  const empty=document.getElementById('perfil-guardados-empty');
+  if(!grid||!empty) return;
+  grid.querySelectorAll('.timeline-card-wrap').forEach(el=>el.remove());
+
+  const todas=_timelinesCache||[];
+  const guardadas=todas.filter(tl=>getGuardadoArray(tl).includes(viewingProfileUid) && canView(tl));
+
+  empty.style.display = guardadas.length ? 'none' : 'block';
+  guardadas.forEach((tl,i)=>appendHomeTimelineCard(grid,tl,i,{allowBulkSelection:false}));
 }
 
 // Calcula y dibuja las tarjetas de "logros" del perfil: total de
@@ -1978,9 +2714,9 @@ function renderPerfilCards(emptyBaseMsg){
       <div class="card-name">${escHtml(tl.nombre)}</div>
     </div>`;
       card.addEventListener('click',()=>openTimeline(tl.id));
-      wrap.appendChild(buildLikeButton(tl));
       wrap.appendChild(card);
       wrap.appendChild(buildTimelineCardInfo(tl,count));
+      wrap.appendChild(buildCardActionsRow(tl));
 
       const activityRow=buildActividadRow(tl);
       if(activityRow) wrap.appendChild(activityRow);
@@ -2314,21 +3050,12 @@ async function openTimeline(id){
 
   const ownerEl=document.getElementById('editor-owner');
   if(ownerEl){
-    if(!puedeEditar&&tl.ownerName){
-      ownerEl.textContent=`por ${tl.ownerName}`;
-      ownerEl.classList.remove('hidden');
-      renderOwnerSocialLinks(tl);
-      if(tl.ownerId){
-        ownerEl.classList.add('editor-owner--link');
-        ownerEl.onclick=()=>renderPerfil(tl.ownerId);
-      }
-    }
-    else {
-      ownerEl.classList.add('hidden');
-      ownerEl.classList.remove('editor-owner--link');
-      ownerEl.onclick=null;
-      renderOwnerSocialLinks(null);
-    }
+    // Ya no mostramos el nombre de quién creó la línea de tiempo en el
+    // encabezado; solo dejamos sus redes sociales, si las activó.
+    ownerEl.classList.add('hidden');
+    ownerEl.classList.remove('editor-owner--link');
+    ownerEl.onclick=null;
+    renderOwnerSocialLinks(tl);
   }
 
   const btnAdd=document.getElementById('btn-add-event');
@@ -2395,11 +3122,13 @@ function renderTimelineFromCache(tl){
       const subCount=(ev.subEventos||[]).length;
       const subHtml=subCount?`<div class="event-subtimeline-pill">${subCount} hito${subCount===1?'':'s'} relacionados</div>`:'';
       const verifyHtml=getVerifyStatusHtml(ev);
+      const flagHtml=getCountryFlagHtml(ev);
       const sectionHtml=getEventSectionHtml(ev,tl);
       item.innerHTML=`
         <div class="event-spacer"></div>
         ${yearHtml}
-        <div class="event-card">
+        <div class="event-card${flagHtml?' has-flag':''}">
+          ${flagHtml}
           ${imgHtml}
           ${verifyHtml}
           ${sectionHtml}
@@ -2532,6 +3261,7 @@ function openModalEvento(eventId=null){
       document.getElementById('ev-titulo').value=ev.titulo||'';
       document.getElementById('ev-fecha').value=ev.fecha||'';
       document.getElementById('ev-descripcion').value=ev.descripcion||'';
+      setEventCountryValue(ev.pais);
       pendingImages=getEventImages(ev);
       renderImageGalleryEditor();
       resetSubtimelineEditor(ev.subEventos||[]);
@@ -2546,6 +3276,7 @@ function openModalEvento(eventId=null){
     document.getElementById('ev-titulo').value='';
     document.getElementById('ev-fecha').value='';
     document.getElementById('ev-descripcion').value='';
+    setEventCountryValue('');
     resetSubtimelineEditor();
     btnElim.classList.add('hidden');
     showModal('modal-evento');
@@ -2571,14 +3302,15 @@ async function guardarEvento(){
     const infoConfirmada=document.getElementById('ev-info-confirmada').checked;
     const fechaVal=document.getElementById('ev-fecha').value.trim();
     const descVal=document.getElementById('ev-descripcion').value.trim();
+    const paisVal=getEventCountryValue();
     const seccionId=document.getElementById('ev-seccion').value||'';
     const subEventos=ordenarSubEventos(getSubtimelineFromEditor());
 
     if(editingEventId){
       const idx=eventos.findIndex(e=>e.id===editingEventId);
-      if(idx>-1) eventos[idx]={...eventos[idx],infoConfirmada,seccionId,titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagenes:[...pendingImages],imagen:null,subEventos};
+      if(idx>-1) eventos[idx]={...eventos[idx],infoConfirmada,seccionId,titulo:tituloVal,fecha:fechaVal,descripcion:descVal,pais:paisVal,imagenes:[...pendingImages],imagen:null,subEventos};
     } else {
-      eventos.push({id:uid(),infoConfirmada,seccionId,titulo:tituloVal,fecha:fechaVal,descripcion:descVal,imagenes:[...pendingImages],subEventos,creadoEn:Date.now()});
+      eventos.push({id:uid(),infoConfirmada,seccionId,titulo:tituloVal,fecha:fechaVal,descripcion:descVal,pais:paisVal,imagenes:[...pendingImages],subEventos,creadoEn:Date.now()});
     }
 
     const eventosOrdenados=ordenarEventos(eventos);
@@ -2628,6 +3360,7 @@ function verEventoFromCache(eventId,tl){
   document.getElementById('ver-fecha').textContent=ev.fecha||'';
   renderVerifyStatus('ver-confirmacion',ev);
   renderEventSectionView(ev,tl);
+  renderEventCountryView(ev);
   document.getElementById('ver-titulo').textContent=ev.titulo;
   document.getElementById('ver-descripcion').textContent=ev.descripcion||'';
   renderVerImagenes(getEventImages(ev));
@@ -2907,6 +3640,9 @@ async function logout(){
 onAuthStateChanged(auth, async user=>{
   currentUser=user;
   isRoot=!!(user&&user.email&&user.email.toLowerCase()===ROOT_EMAIL.toLowerCase());
+  if(user){
+    try { await getUserProfile(user.uid); } catch(e){ console.error(e); }
+  }
 
   // Muestra la nota de deploy solo si el usuario logueado es root.
   document.getElementById('nota-deploy-root').classList.toggle('hidden', !isRoot);
@@ -2959,11 +3695,27 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('btn-nueva-perfil').addEventListener('click',openModalNueva);
   document.getElementById('btn-copy-perfil-link').addEventListener('click',copyCurrentProfileLink);
   document.getElementById('btn-perfil-config').addEventListener('click',openModalPerfilConfig);
+  document.getElementById('perfil-avatar-edit').addEventListener('click',()=>{
+    document.getElementById('perfil-avatar-input').click();
+  });
+  document.getElementById('perfil-avatar-input').addEventListener('change',e=>{
+    const archivo=e.target.files&&e.target.files[0];
+    if(archivo) cambiarFotoPerfil(archivo);
+    e.target.value='';
+  });
   document.getElementById('modal-close-perfil-config').addEventListener('click',()=>hideModal('modal-perfil-config'));
   document.getElementById('btn-perfil-config-guardar').addEventListener('click',guardarPerfilConfig);
+  document.getElementById('perfil-username-input').addEventListener('input',e=>{
+    const clean=normalizeUsername(e.target.value);
+    if(e.target.value!==clean) e.target.value=clean;
+  });
   document.getElementById('perfil-social-enabled').addEventListener('change',e=>setPerfilSocialEnabled(e.target.checked));
   document.getElementById('btn-toggle-perfil-stats').addEventListener('click',()=>{
     perfilViewMode = perfilViewMode==='stats' ? 'lineas' : 'stats';
+    applyPerfilViewMode();
+  });
+  document.getElementById('btn-toggle-perfil-guardados').addEventListener('click',()=>{
+    perfilViewMode = perfilViewMode==='guardados' ? 'lineas' : 'guardados';
     applyPerfilViewMode();
   });
   document.getElementById('btn-solicitudes').addEventListener('click',renderSolicitudes);
@@ -3078,6 +3830,12 @@ document.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('modal-close-ver').addEventListener('click',()=>hideModal('modal-ver'));
   document.getElementById('btn-editar-desde-ver').addEventListener('click',()=>{ const id=editingEventId; hideModal('modal-ver'); openModalEvento(id); });
 
+  document.getElementById('modal-close-comentarios').addEventListener('click',()=>hideModal('modal-comentarios'));
+  document.getElementById('btn-enviar-comentario').addEventListener('click',enviarComentario);
+  document.getElementById('comentario-texto').addEventListener('keydown',e=>{
+    if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); enviarComentario(); }
+  });
+
   document.getElementById('lightbox-close').addEventListener('click',closeLightbox);
   document.getElementById('lightbox').addEventListener('click',e=>{ if(e.target.id==='lightbox') closeLightbox(); });
   document.getElementById('lightbox-img').addEventListener('click',lightboxSiguiente);
@@ -3100,14 +3858,14 @@ document.addEventListener('DOMContentLoaded',()=>{
     btn.addEventListener('click',()=>selectFondo(btn.closest('.fondo-picker').dataset.scope,btn.dataset.fondo));
   });
 
-  ['modal-nueva','modal-ver','modal-perfil-config'].forEach(id=>{
+  ['modal-nueva','modal-ver'].forEach(id=>{
     document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) hideModal(id); });
   });
   document.getElementById('modal-evento').addEventListener('click',function(e){ if(e.target===this) closeEventModal(); });
 
   document.addEventListener('keydown',e=>{
     if(e.key==='Escape'){
-      ['modal-nueva','modal-ver','modal-editar-tl','modal-perfil-config'].forEach(id=>hideModal(id));
+      ['modal-nueva','modal-ver','modal-editar-tl'].forEach(id=>hideModal(id));
       closeEventModal();
     }
   });

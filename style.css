@@ -2172,32 +2172,85 @@ body::before {
 .perfil-hero {
   display: flex;
   align-items: center;
-  gap: 22px;
+  gap: 36px;
   margin-bottom: 48px;
   animation: fadeUp 0.5s ease both;
 }
 
+/* Contenedor del avatar: permite superponer el botón de "cambiar foto",
+   igual que al tocar/pasar el mouse sobre la foto de perfil en Instagram. */
+.perfil-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+  width: 96px;
+  height: 96px;
+}
+
 .perfil-avatar {
-  width: 84px;
-  height: 84px;
+  width: 96px;
+  height: 96px;
   border-radius: 50%;
   object-fit: cover;
   background: var(--surface2);
   border: 2px solid var(--border);
-  flex-shrink: 0;
+  display: block;
 }
+
+/* Botón redondo con cámara que aparece sobre el avatar (solo en tu
+   propio perfil) para subir una foto nueva a Cloudinary. */
+.perfil-avatar-edit {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid var(--bg, #0b0b0f);
+  background: var(--accent, #6c5ce7);
+  color: #fff;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+.perfil-avatar-edit:hover { transform: scale(1.08); filter: brightness(1.1); }
 
 .perfil-nombre {
   font-family: var(--font-display);
-  font-size: 1.9rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
-.perfil-count {
-  font-size: 0.88rem;
+.perfil-username {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 14px;
+}
+
+/* Fila de estadísticas al estilo Instagram: número en negrita + etiqueta,
+   separadas en columnas dentro de la misma línea. */
+.perfil-stats-row {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.perfil-stat {
+  font-size: 0.92rem;
   color: var(--text-muted);
 }
+.perfil-stat strong {
+  color: var(--text, #fff);
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.perfil-count { font-size: 0.88rem; color: var(--text-muted); }
 
 .perfil-hero-info { flex: 1; }
 
@@ -2206,7 +2259,7 @@ body::before {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
 }
 
 /* Botón que alterna entre "Líneas de tiempo" y "Estadísticas del perfil" */
@@ -2218,9 +2271,13 @@ body::before {
 
 @media (max-width: 640px) {
   .perfil-main { padding: 32px 20px 60px; }
-  .perfil-hero { gap: 16px; flex-wrap: wrap; }
-  .perfil-avatar { width: 64px; height: 64px; }
-  .perfil-nombre { font-size: 1.4rem; }
+  .perfil-hero { gap: 18px; align-items: center; }
+  .perfil-avatar-wrap { width: 76px; height: 76px; }
+  .perfil-avatar { width: 76px; height: 76px; }
+  .perfil-avatar-edit { width: 26px; height: 26px; font-size: 0.75rem; }
+  .perfil-nombre { font-size: 1.2rem; margin-bottom: 10px; }
+  .perfil-stats-row { gap: 16px; margin-bottom: 12px; }
+  .perfil-stat { font-size: 0.8rem; }
   .perfil-actions { width: 100%; justify-content: stretch; }
   .perfil-actions .btn-secondary { flex: 1; justify-content: center; }
   .perfil-stats-toggle { margin-left: 0; text-align: center; }
@@ -2433,6 +2490,94 @@ body::before {
 .like-heart { font-size: 0.85rem; line-height: 1; }
 .like-count { font-weight: 500; }
 
+/* ===== FILA DE ACCIONES (me gusta / comentar / compartir / guardar) =====
+   Va justo después de la descripción de cada tarjeta, al estilo X/Twitter. */
+.card-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  margin-top: 2px;
+  position: relative;
+  z-index: 2;
+}
+.card-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-family: var(--font-body);
+  padding: 5px 7px;
+  border-radius: 50px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.card-action-btn .card-action-icon { font-size: 0.95rem; line-height: 1; }
+.card-action-btn:hover:not(.disabled) { background: rgba(255,255,255,0.06); color: var(--text); }
+
+.card-action-btn.card-action-like:hover:not(.disabled),
+.card-action-btn.card-action-like.liked { color: #e8607f; }
+.card-action-btn.card-action-like.liked:hover:not(.disabled) { background: rgba(232,96,127,0.12); }
+
+.card-action-btn.card-action-comment:hover { color: #6cb8e8; }
+.card-action-btn.card-action-share:hover { color: #5AE8A0; }
+
+.card-action-btn.card-action-save.saved,
+.card-action-btn.card-action-save:hover { color: #E8B84A; }
+.card-action-btn.card-action-save.saved:hover { background: rgba(232,184,74,0.12); }
+
+.card-action-btn.disabled { cursor: default; opacity: 0.55; }
+
+/* ===== MODAL DE COMENTARIOS ===== */
+.modal-comentarios { max-width: 480px; }
+.comentarios-lista {
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 18px 0;
+  padding-right: 4px;
+}
+.comentario-item { display: flex; flex-direction: column; gap: 2px; }
+.comentario-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.comentario-autor { font-weight: 600; font-size: 0.86rem; }
+.comentario-fecha { font-size: 0.72rem; color: var(--text-muted); }
+.comentario-texto { font-size: 0.86rem; color: var(--text-muted); line-height: 1.4; white-space: pre-wrap; }
+.comentario-borrar {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+}
+.comentario-borrar:hover { color: #e74c3c; }
+
+.comentarios-form { display: flex; gap: 10px; align-items: flex-end; }
+.comentarios-form textarea {
+  flex: 1;
+  resize: none;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  padding: 10px 12px;
+  font-family: var(--font-body);
+  font-size: 0.88rem;
+}
+.comentarios-form textarea:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-glow); }
+.comentarios-login-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 10px; text-align: center; }
+
 /* ===== PANTALLA SOLICITUDES ===== */
 .solicitudes-main {
   max-width: 800px;
@@ -2582,3 +2727,79 @@ body::before {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ===== PAÍS DEL EVENTO ===== */
+/* Banderita circular en la esquina superior derecha de la tarjeta */
+.event-flag {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.16), 0 1px 4px rgba(0,0,0,0.35);
+  filter: brightness(0.72);
+  z-index: 1;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+/* País en la ventana "Ver evento" */
+.event-country-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 999px;
+  padding: 3px 10px 3px 4px;
+  margin-bottom: 12px;
+  background: rgba(255,255,255,0.045);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.event-country-flag {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* En pantallas angostas, dejar espacio para que la etiqueta no toque la bandera */
+@media (max-width: 700px) {
+  .event-card.has-flag .event-verify-status { max-width: calc(100% - 20px); }
+}
+
+/* ===== INFORMACIÓN DETALLADA ===== */
+/* Casilla en la barra del editor (mismo estilo que el botón Reset) */
+.detail-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-left: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.detail-toggle:hover,
+.detail-toggle:has(input:checked) { border-color: var(--accent); color: var(--accent); }
+.detail-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* El estado de verificación queda oculto salvo que la casilla esté activada */
+body:not(.show-verify-details) .event-verify-status { display: none; }
+/* Sin esa etiqueta arriba, dejar espacio para que el título no quede bajo la bandera */
+body:not(.show-verify-details) .event-card.has-flag:not(:has(.event-thumbnail)) { padding-top: 32px; }
+/* Los hitos relacionados de cada evento también quedan ocultos salvo que la casilla esté activada */
+body:not(.show-verify-details) .event-subtimeline-pill { display: none; }

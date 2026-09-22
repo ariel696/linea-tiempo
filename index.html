@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Línea de Tiempo</title>
+  <title>Universo Líneas de Tiempo</title>
   <link rel="stylesheet" href="style.css"/>
   <link rel="icon" type="image/png" href="linea-tiempo.png" sizes="any">
   <link href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
@@ -13,7 +13,7 @@
   <!-- ====== PANTALLA INICIO ====== -->
   <div id="screen-home" class="screen active">
     <header class="home-header">
-      <div class="logo">⟡ Líneas de Tiempo</div>
+      <div class="logo">⟡ Universo Líneas de Tiempo</div>
       <div class="header-right">
         <div id="user-area" class="user-area hidden">
           <img id="user-avatar" class="user-avatar" src="" alt=""/>
@@ -27,8 +27,8 @@
     </header>
     <main class="home-main">
       <div class="home-hero">
-        <h1>NUESTRA LINEA DE TIEMPO</h1>
-        <p class="hero-sub">NUESTRA HISTORIA EN LINEAS DE TIEMPO<br/>TODAS EN UN SOLO LUGAR.</p>
+        <h1>UNIVERSO LÍNEAS DE TIEMPO</h1>
+        <p class="hero-sub">NUESTRA HISTORIA EN LÍNEAS DE TIEMPO<br/>TODAS EN UN SOLO LUGAR.</p>
         <p class="hero-sub-note">Estas son las líneas de tiempo que el administrador ha destacado. Cada usuario tiene su propio perfil con todas las que ha creado, y puede sugerir que alguna aparezca aquí.</p>
         <button class="btn-primary hidden" id="btn-nueva">
           <span class="btn-icon">+</span> Crear línea de tiempo
@@ -109,7 +109,7 @@
     <div class="auth-layout">
       <div class="auth-brand">
         <div class="auth-logo">⟡</div>
-        <h2>Líneas de Tiempo</h2>
+        <h2>Universo Líneas de Tiempo</h2>
         <p>Organiza tu historia,<br/><em>un evento a la vez.</em></p>
         <div class="auth-brand-deco">
           <div class="auth-brand-deco-dot"></div>
@@ -192,15 +192,26 @@
     </header>
     <main class="perfil-main">
       <div class="perfil-hero">
-        <img id="perfil-avatar" class="perfil-avatar" src="" alt=""/>
+        <div class="perfil-avatar-wrap" id="perfil-avatar-wrap">
+          <img id="perfil-avatar" class="perfil-avatar" src="" alt=""/>
+          <button type="button" class="perfil-avatar-edit hidden" id="perfil-avatar-edit" title="Cambiar foto de perfil">📷</button>
+          <input type="file" id="perfil-avatar-input" accept="image/*" hidden/>
+        </div>
         <div class="perfil-hero-info">
           <h2 id="perfil-nombre" class="perfil-nombre"></h2>
-          <p id="perfil-count" class="perfil-count"></p>
-        </div>
-        <div class="perfil-actions">
-          <button class="btn-secondary sm hidden" id="btn-perfil-config">⚙ Configuración</button>
-          <button class="btn-secondary sm" id="btn-copy-perfil-link">Copiar enlace</button>
-          <button class="btn-secondary sm perfil-stats-toggle" id="btn-toggle-perfil-stats">📊 Estadísticas del perfil</button>
+          <p id="perfil-username" class="perfil-username hidden"></p>
+          <div class="perfil-stats-row" id="perfil-stats-row">
+            <span class="perfil-stat"><strong id="perfil-stat-lineas">0</strong> líneas de tiempo</span>
+            <span class="perfil-stat"><strong id="perfil-stat-eventos">0</strong> eventos</span>
+            <span class="perfil-stat hidden" id="perfil-stat-privadas-wrap"><strong id="perfil-stat-privadas">0</strong> privadas</span>
+          </div>
+          <p id="perfil-count" class="perfil-count hidden"></p>
+          <div class="perfil-actions">
+            <button class="btn-secondary sm hidden" id="btn-perfil-config">⚙ Configuración</button>
+            <button class="btn-secondary sm" id="btn-copy-perfil-link">Copiar enlace</button>
+            <button class="btn-secondary sm perfil-stats-toggle" id="btn-toggle-perfil-stats">📊 Estadísticas del perfil</button>
+            <button class="btn-secondary sm hidden" id="btn-toggle-perfil-guardados">🔖 Guardadas</button>
+          </div>
         </div>
       </div>
       <section class="timelines-section" id="perfil-lineas-section">
@@ -247,6 +258,19 @@
         </div>
         <div id="perfil-stats-grid" class="perfil-stats-grid"></div>
       </section>
+
+      <!-- ====== GUARDADAS (vista alternativa, solo en tu propio perfil) ====== -->
+      <section class="timelines-section perfil-guardados-section hidden" id="perfil-guardados-section">
+        <div class="timelines-section-header">
+          <h2 class="section-title">Líneas de tiempo guardadas</h2>
+        </div>
+        <div id="perfil-guardados-grid" class="timelines-grid">
+          <div class="empty-state" id="perfil-guardados-empty">
+            <div class="empty-icon">🔖</div>
+            <p>Aún no has guardado ninguna línea de tiempo.<br/>Usa el ícono 🔖 en cualquier tarjeta para guardarla aquí.</p>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -274,6 +298,15 @@
     <div class="modal">
       <button class="modal-close" id="modal-close-perfil-config">✕</button>
       <h2>Configuración del perfil</h2>
+      <div class="form-group">
+        <label>Nombre visible</label>
+        <input type="text" id="perfil-display-name" placeholder="Tu nombre"/>
+      </div>
+      <div class="form-group">
+        <label>Nombre de usuario único</label>
+        <input type="text" id="perfil-username-input" placeholder="universo-lineas"/>
+        <p class="form-help">Se usará en tu enlace público. Solo letras, números, puntos, guiones y guiones bajos.</p>
+      </div>
       <div class="form-group">
         <label class="toggle-row">
           <input type="checkbox" id="perfil-social-enabled"/>
@@ -444,6 +477,10 @@
         <span class="zoom-label" id="zoom-label">100%</span>
         <button class="zoom-btn" id="btn-zoom-in" title="Acercar">+</button>
         <button class="zoom-reset" id="btn-zoom-reset">Reset</button>
+        <label class="detail-toggle" title="Muestra el estado de verificación de cada evento y sus hitos relacionados.">
+          <input type="checkbox" id="chk-info-detallada"/>
+          <span>Información detallada</span>
+        </label>
         <div class="timeline-section-filters hidden" id="timeline-section-filters"></div>
         <span class="zoom-hint">Ctrl + scroll para zoom · Arrastra para mover</span>
       </div>
@@ -492,9 +529,212 @@
         <textarea id="ev-descripcion" placeholder="Cuenta qué pasó en este momento..." rows="3"></textarea>
       </div>
       <div class="form-group">
+        <label>País <span class="opcional">(opcional)</span></label>
+        <input type="text" id="ev-pais" list="lista-paises" placeholder="Escribe o selecciona un país" autocomplete="off" style="color-scheme: dark;"/>
+        <datalist id="lista-paises">
+          <option value="Afganistán"></option>
+          <option value="Albania"></option>
+          <option value="Alemania"></option>
+          <option value="Andorra"></option>
+          <option value="Angola"></option>
+          <option value="Antigua y Barbuda"></option>
+          <option value="Arabia Saudita"></option>
+          <option value="Argelia"></option>
+          <option value="Argentina"></option>
+          <option value="Armenia"></option>
+          <option value="Australia"></option>
+          <option value="Austria"></option>
+          <option value="Azerbaiyán"></option>
+          <option value="Bahamas"></option>
+          <option value="Bangladés"></option>
+          <option value="Barbados"></option>
+          <option value="Baréin"></option>
+          <option value="Bélgica"></option>
+          <option value="Belice"></option>
+          <option value="Benín"></option>
+          <option value="Bielorrusia"></option>
+          <option value="Bolivia"></option>
+          <option value="Bosnia y Herzegovina"></option>
+          <option value="Botsuana"></option>
+          <option value="Brasil"></option>
+          <option value="Brunéi"></option>
+          <option value="Bulgaria"></option>
+          <option value="Burkina Faso"></option>
+          <option value="Burundi"></option>
+          <option value="Bután"></option>
+          <option value="Cabo Verde"></option>
+          <option value="Camboya"></option>
+          <option value="Camerún"></option>
+          <option value="Canadá"></option>
+          <option value="Catar"></option>
+          <option value="Chad"></option>
+          <option value="Chile"></option>
+          <option value="China"></option>
+          <option value="Chipre"></option>
+          <option value="Ciudad del Vaticano"></option>
+          <option value="Colombia"></option>
+          <option value="Comoras"></option>
+          <option value="Corea del Norte"></option>
+          <option value="Corea del Sur"></option>
+          <option value="Costa de Marfil"></option>
+          <option value="Costa Rica"></option>
+          <option value="Croacia"></option>
+          <option value="Cuba"></option>
+          <option value="Dinamarca"></option>
+          <option value="Dominica"></option>
+          <option value="Ecuador"></option>
+          <option value="Egipto"></option>
+          <option value="El Salvador"></option>
+          <option value="Emiratos Árabes Unidos"></option>
+          <option value="Eritrea"></option>
+          <option value="Eslovaquia"></option>
+          <option value="Eslovenia"></option>
+          <option value="España"></option>
+          <option value="Estados Unidos"></option>
+          <option value="Estonia"></option>
+          <option value="Esuatini"></option>
+          <option value="Etiopía"></option>
+          <option value="Filipinas"></option>
+          <option value="Finlandia"></option>
+          <option value="Fiyi"></option>
+          <option value="Francia"></option>
+          <option value="Gabón"></option>
+          <option value="Gambia"></option>
+          <option value="Georgia"></option>
+          <option value="Ghana"></option>
+          <option value="Granada"></option>
+          <option value="Grecia"></option>
+          <option value="Guatemala"></option>
+          <option value="Guinea"></option>
+          <option value="Guinea Ecuatorial"></option>
+          <option value="Guinea-Bisáu"></option>
+          <option value="Guyana"></option>
+          <option value="Haití"></option>
+          <option value="Honduras"></option>
+          <option value="Hungría"></option>
+          <option value="India"></option>
+          <option value="Indonesia"></option>
+          <option value="Irak"></option>
+          <option value="Irán"></option>
+          <option value="Irlanda"></option>
+          <option value="Islandia"></option>
+          <option value="Islas Marshall"></option>
+          <option value="Islas Salomón"></option>
+          <option value="Israel"></option>
+          <option value="Italia"></option>
+          <option value="Jamaica"></option>
+          <option value="Japón"></option>
+          <option value="Jordania"></option>
+          <option value="Kazajistán"></option>
+          <option value="Kenia"></option>
+          <option value="Kirguistán"></option>
+          <option value="Kiribati"></option>
+          <option value="Kosovo"></option>
+          <option value="Kuwait"></option>
+          <option value="Laos"></option>
+          <option value="Lesoto"></option>
+          <option value="Letonia"></option>
+          <option value="Líbano"></option>
+          <option value="Liberia"></option>
+          <option value="Libia"></option>
+          <option value="Liechtenstein"></option>
+          <option value="Lituania"></option>
+          <option value="Luxemburgo"></option>
+          <option value="Macedonia del Norte"></option>
+          <option value="Madagascar"></option>
+          <option value="Malasia"></option>
+          <option value="Malaui"></option>
+          <option value="Maldivas"></option>
+          <option value="Malí"></option>
+          <option value="Malta"></option>
+          <option value="Marruecos"></option>
+          <option value="Mauricio"></option>
+          <option value="Mauritania"></option>
+          <option value="México"></option>
+          <option value="Micronesia"></option>
+          <option value="Moldavia"></option>
+          <option value="Mónaco"></option>
+          <option value="Mongolia"></option>
+          <option value="Montenegro"></option>
+          <option value="Mozambique"></option>
+          <option value="Myanmar"></option>
+          <option value="Namibia"></option>
+          <option value="Nauru"></option>
+          <option value="Nepal"></option>
+          <option value="Nicaragua"></option>
+          <option value="Níger"></option>
+          <option value="Nigeria"></option>
+          <option value="Noruega"></option>
+          <option value="Nueva Zelanda"></option>
+          <option value="Omán"></option>
+          <option value="Países Bajos"></option>
+          <option value="Pakistán"></option>
+          <option value="Palaos"></option>
+          <option value="Palestina"></option>
+          <option value="Panamá"></option>
+          <option value="Papúa Nueva Guinea"></option>
+          <option value="Paraguay"></option>
+          <option value="Perú"></option>
+          <option value="Polonia"></option>
+          <option value="Portugal"></option>
+          <option value="Reino Unido"></option>
+          <option value="República Centroafricana"></option>
+          <option value="República Checa"></option>
+          <option value="República del Congo"></option>
+          <option value="República Democrática del Congo"></option>
+          <option value="República Dominicana"></option>
+          <option value="Ruanda"></option>
+          <option value="Rumania"></option>
+          <option value="Rusia"></option>
+          <option value="Samoa"></option>
+          <option value="San Cristóbal y Nieves"></option>
+          <option value="San Marino"></option>
+          <option value="San Vicente y las Granadinas"></option>
+          <option value="Santa Lucía"></option>
+          <option value="Santo Tomé y Príncipe"></option>
+          <option value="Senegal"></option>
+          <option value="Serbia"></option>
+          <option value="Seychelles"></option>
+          <option value="Sierra Leona"></option>
+          <option value="Singapur"></option>
+          <option value="Siria"></option>
+          <option value="Somalia"></option>
+          <option value="Sri Lanka"></option>
+          <option value="Sudáfrica"></option>
+          <option value="Sudán"></option>
+          <option value="Sudán del Sur"></option>
+          <option value="Suecia"></option>
+          <option value="Suiza"></option>
+          <option value="Surinam"></option>
+          <option value="Tailandia"></option>
+          <option value="Taiwán"></option>
+          <option value="Tanzania"></option>
+          <option value="Tayikistán"></option>
+          <option value="Timor Oriental"></option>
+          <option value="Togo"></option>
+          <option value="Tonga"></option>
+          <option value="Trinidad y Tobago"></option>
+          <option value="Túnez"></option>
+          <option value="Turkmenistán"></option>
+          <option value="Turquía"></option>
+          <option value="Tuvalu"></option>
+          <option value="Ucrania"></option>
+          <option value="Uganda"></option>
+          <option value="Uruguay"></option>
+          <option value="Uzbekistán"></option>
+          <option value="Vanuatu"></option>
+          <option value="Venezuela"></option>
+          <option value="Vietnam"></option>
+          <option value="Yemen"></option>
+          <option value="Yibuti"></option>
+          <option value="Zambia"></option>
+          <option value="Zimbabue"></option>
+        </datalist>
+      </div>
+      <div class="form-group">
         <label class="verify-row" title="Marca esta casilla cuando la fecha y los datos del evento ya estén verificados.">
           <input type="checkbox" id="ev-info-confirmada"/>
-          <span>Información confirmada</span>
+          <span>Información verificada</span>
         </label>
       </div>
       <div class="form-group">
@@ -528,6 +768,7 @@
       <div class="ver-fecha" id="ver-fecha"></div>
       <div class="event-verify-status hidden" id="ver-confirmacion"></div>
       <div class="event-section-pill hidden" id="ver-seccion"></div>
+      <div class="event-country-pill hidden" id="ver-pais"></div>
       <h2 id="ver-titulo"></h2>
       <div id="ver-imagenes" class="ver-imagenes hidden"></div>
       <p id="ver-descripcion" class="ver-desc"></p>
@@ -538,6 +779,25 @@
 
   <!-- Toast -->
   <div id="toast" class="toast hidden"></div>
+
+  <!-- ====== MODAL: COMENTARIOS DE UNA LÍNEA DE TIEMPO ====== -->
+  <div id="modal-comentarios" class="modal-overlay hidden">
+    <div class="modal modal-comentarios">
+      <button class="modal-close" id="modal-close-comentarios">✕</button>
+      <h2>Comentarios</h2>
+      <div id="comentarios-lista" class="comentarios-lista">
+        <div class="empty-state" id="comentarios-empty">
+          <div class="empty-icon">💬</div>
+          <p>Aún no hay comentarios. ¡Sé el primero!</p>
+        </div>
+      </div>
+      <div class="comentarios-form" id="comentarios-form">
+        <textarea id="comentario-texto" placeholder="Escribe un comentario..." maxlength="500" rows="2"></textarea>
+        <button class="btn-primary sm" id="btn-enviar-comentario">Comentar</button>
+      </div>
+      <p class="comentarios-login-note hidden" id="comentarios-login-note">Inicia sesión para comentar.</p>
+    </div>
+  </div>
 
   <!-- Lightbox: ver una imagen del evento en grande -->
   <div id="lightbox" class="lightbox hidden">
@@ -555,6 +815,30 @@
   <a href="https://pagina-lo-mio.web.app" id="btn-lo-mio-root" class="btn-lo-mio-root hidden">
     ⟵ Lo Mío
   </a>
+
+  <!-- Campo de país: escribir para filtrar o elegir de la lista; solo se acepta un país válido -->
+  <script>
+    (function () {
+      var input = document.getElementById('ev-pais');
+      var lista = document.getElementById('lista-paises');
+      if (!input || !lista) return;
+      function limpiar(s) {
+        return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+      }
+      input.addEventListener('change', function () {
+        var buscado = limpiar(input.value);
+        if (!buscado) { input.value = ''; return; }
+        var opciones = lista.querySelectorAll('option');
+        for (var i = 0; i < opciones.length; i++) {
+          if (limpiar(opciones[i].value) === buscado) {
+            input.value = opciones[i].value;
+            return;
+          }
+        }
+        input.value = ''; // no coincide con ningún país de la lista
+      });
+    })();
+  </script>
 
   <script type="module" src="script.js"></script>
 </body>

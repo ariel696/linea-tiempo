@@ -3,6 +3,14 @@
     "default": "linea-tiempo-16fa4",
     "linea-tiempo": "linea-tiempo-16fa4"
   },
-  "targets": {},
+  "targets": {
+    "linea-tiempo-16fa4": {
+      "hosting": {
+        "universo-lineas-de-tiempo": [
+          "universo-lineas-de-tiempo"
+        ]
+      }
+    }
+  },
   "etags": {}
 }

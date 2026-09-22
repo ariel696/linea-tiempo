@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "universo-lineas-de-tiempo",
     "public": ".",
     "ignore": [
       "firebase.json",
